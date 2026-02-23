@@ -5,7 +5,7 @@
 
 import { Electroview } from "electrobun/view";
 import type { BlockDevRPC } from "../../shared/rpc-types";
-import type { ConsoleMessage, RunningProcess } from "../../shared/types";
+import type { ConsoleMessage, RunningProcess, ServerResourceStats } from "../../shared/types";
 
 // --- Listener types ---
 
@@ -24,6 +24,7 @@ type BuildOutputListener = (output: {
   projectId: string;
   line: string;
 }) => void;
+type ResourceStatsListener = (stats: ServerResourceStats) => void;
 
 // --- Listener registries ---
 
@@ -33,6 +34,7 @@ const listeners = {
   progress: new Set<ProgressListener>(),
   fileChange: new Set<FileChangeListener>(),
   buildOutput: new Set<BuildOutputListener>(),
+  resourceStats: new Set<ResourceStatsListener>(),
 };
 
 // --- Module-level RPC singleton ---
@@ -55,6 +57,9 @@ const rpc = Electroview.defineRPC<BlockDevRPC>({
       },
       buildOutput: (output) => {
         listeners.buildOutput.forEach((fn) => fn(output));
+      },
+      resourceStats: (stats) => {
+        listeners.resourceStats.forEach((fn) => fn(stats));
       },
     },
   },
@@ -105,5 +110,12 @@ export function onBuildOutput(listener: BuildOutputListener): () => void {
   listeners.buildOutput.add(listener);
   return () => {
     listeners.buildOutput.delete(listener);
+  };
+}
+
+export function onResourceStats(listener: ResourceStatsListener): () => void {
+  listeners.resourceStats.add(listener);
+  return () => {
+    listeners.resourceStats.delete(listener);
   };
 }

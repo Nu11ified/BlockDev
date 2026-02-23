@@ -119,3 +119,54 @@ export interface ConsoleMessage {
   source: string;
   text: string;
 }
+
+// === Server Resource Monitoring (Phase 2) ===
+export interface ServerResourceStats {
+  serverId: string;
+  timestamp: number;
+  heapUsedMB: number;
+  heapMaxMB: number;
+  rssMB: number;
+  cpuPercent: number;
+  uptimeSeconds: number;
+  tps: number | null;
+  playerCount: number | null;
+  playerList: string[];
+  worldSizeMB: number | null;
+}
+
+export interface ProcessInfo {
+  serverId: string;
+  pid: number;
+  jvmArgs: string[];
+  serverPort: number;
+  framework: string;
+  mcVersion: string;
+  startedAt: number;
+  serverDir: string;
+}
+
+// === Resource/Texture Development (Phase 3) ===
+export interface FileTreeEntry {
+  name: string;
+  path: string;           // relative to workspace root
+  type: "file" | "directory";
+  size?: number;
+  extension?: string;
+  children?: FileTreeEntry[];
+}
+
+export interface ResourcePackInfo {
+  name: string;
+  description: string;
+  packFormat: number;
+  path: string;
+}
+
+export interface FileContent {
+  path: string;
+  content: string;
+  encoding: "utf-8" | "base64";
+  size: number;
+  lastModified: number;
+}

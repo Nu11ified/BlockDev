@@ -2,10 +2,21 @@
 // Main process entry point. Creates the window first for immediate feedback,
 // then initializes services and loads plugins in the background.
 
-import { BrowserWindow, BrowserView } from "electrobun/bun";
-import { join } from "node:path";
+import { BrowserWindow, BrowserView, Utils } from "electrobun/bun";
+import { join, resolve } from "node:path";
 import { platform, homedir } from "node:os";
 import { mkdirSync, appendFileSync } from "node:fs";
+
+// ---------------------------------------------------------------------------
+// Path helper: expand leading ~/  to the user's home directory
+// ---------------------------------------------------------------------------
+
+function resolvePath(p: string): string {
+  if (p === "~" || p.startsWith("~/")) {
+    return join(homedir(), p.slice(2));
+  }
+  return resolve(p);
+}
 
 import type { BlockDevRPC } from "../shared/rpc-types";
 import type {
@@ -20,6 +31,8 @@ import { JavaManager } from "./services/java-manager";
 import { ServerController } from "./services/server-controller";
 import { WorkspaceManager } from "./services/workspace-manager";
 import { FileWatcher } from "./services/file-watcher";
+import { ProcessMonitor } from "./services/process-monitor";
+import { ResourceManager } from "./services/resource-manager";
 import { createPluginRegistry, loadBuiltinPlugins } from "./plugins/plugin-loader";
 
 // ---------------------------------------------------------------------------
@@ -62,6 +75,8 @@ let javaManager: JavaManager;
 let serverController: ServerController;
 let workspaceManager: WorkspaceManager;
 let fileWatcher: FileWatcher;
+let processMonitor: ProcessMonitor;
+let resourceManager: ResourceManager;
 let registry: ReturnType<typeof createPluginRegistry>;
 let servicesReady = false;
 
@@ -115,7 +130,8 @@ const rpc = BrowserView.defineRPC<BlockDevRPC>({
             return { success: false, error: "Services are still initializing, please try again in a moment" };
           }
 
-          const { name, path, framework, mcVersion, build } = params;
+          const { name, path: rawPath, framework, mcVersion, build } = params;
+          const path = resolvePath(rawPath);
 
           const provider = registry.get(framework);
           if (!provider) {
@@ -226,7 +242,26 @@ const rpc = BrowserView.defineRPC<BlockDevRPC>({
             return { success: false, error: `Unknown framework: ${instance.framework}` };
           }
 
-          await serverController.start(instance, provider, onConsole, onStatus);
+          await serverController.start(instance, provider, onConsole, onStatus, onLineHook);
+
+          // Start resource monitoring after the server process is running
+          const status = serverController.getStatus(params.serverId);
+          if (status) {
+            processMonitor.startMonitoring(
+              params.serverId,
+              status.pid,
+              instance.path,
+              status.startedAt,
+              (stats) => {
+                try {
+                  rpc.send("resourceStats", stats);
+                } catch {
+                  // Window closed
+                }
+              },
+            );
+          }
+
           return { success: true };
         } catch (err: unknown) {
           const message = err instanceof Error ? err.message : String(err);
@@ -239,6 +274,7 @@ const rpc = BrowserView.defineRPC<BlockDevRPC>({
           if (!servicesReady) {
             return { success: false, error: "Services are still initializing" };
           }
+          processMonitor.stopMonitoring(params.serverId);
           await serverController.stop(params.serverId);
           return { success: true };
         } catch (err: unknown) {
@@ -252,7 +288,28 @@ const rpc = BrowserView.defineRPC<BlockDevRPC>({
           if (!servicesReady) {
             return { success: false, error: "Services are still initializing" };
           }
-          await serverController.restart(params.serverId, onConsole, onStatus);
+          processMonitor.stopMonitoring(params.serverId);
+          await serverController.restart(params.serverId, onConsole, onStatus, onLineHook);
+
+          // Restart monitoring with the new PID
+          const status = serverController.getStatus(params.serverId);
+          if (status) {
+            const instance = resolveServer(params.serverId);
+            processMonitor.startMonitoring(
+              params.serverId,
+              status.pid,
+              instance.path,
+              status.startedAt,
+              (stats) => {
+                try {
+                  rpc.send("resourceStats", stats);
+                } catch {
+                  // Window closed
+                }
+              },
+            );
+          }
+
           return { success: true };
         } catch (err: unknown) {
           const message = err instanceof Error ? err.message : String(err);
@@ -446,9 +503,17 @@ const rpc = BrowserView.defineRPC<BlockDevRPC>({
       // --- System / utility ---
 
       selectDirectory: async () => {
-        // Native directory dialog will be integrated later.
-        // For now return null to indicate "no selection".
-        return { path: null };
+        try {
+          const paths = await Utils.openFileDialog({
+            canChooseDirectories: true,
+            canChooseFiles: false,
+            allowsMultipleSelection: false,
+          });
+          const selected = paths[0] && paths[0] !== "" ? paths[0] : null;
+          return { path: selected };
+        } catch {
+          return { path: null };
+        }
       },
 
       openInExplorer: async (params) => {
@@ -481,6 +546,111 @@ const rpc = BrowserView.defineRPC<BlockDevRPC>({
           return provider.getReloadCapability();
         } catch {
           return "cold";
+        }
+      },
+
+      // --- Dev Tools: resource monitoring ---
+
+      getServerResources: async (params) => {
+        try {
+          if (!servicesReady) return null;
+          return processMonitor.getStats(params.serverId);
+        } catch {
+          return null;
+        }
+      },
+
+      getProcessInfo: async (params) => {
+        try {
+          if (!servicesReady) return null;
+          const status = serverController.getStatus(params.serverId);
+          if (!status) return null;
+
+          const instance = resolveServer(params.serverId);
+          return {
+            serverId: params.serverId,
+            pid: status.pid,
+            jvmArgs: instance.jvmArgs,
+            serverPort: instance.port,
+            framework: instance.framework,
+            mcVersion: instance.mcVersion,
+            startedAt: status.startedAt,
+            serverDir: instance.path,
+          };
+        } catch {
+          return null;
+        }
+      },
+
+      // --- Resource/Texture Development ---
+
+      listDirectory: async (params) => {
+        try {
+          if (!servicesReady) return [];
+          const workspacePath = workspaceManager.getCurrentPath();
+          if (!workspacePath) return [];
+          return resourceManager.listDirectory(workspacePath, params.path, params.depth ?? 1);
+        } catch {
+          return [];
+        }
+      },
+
+      readFile: async (params) => {
+        if (!servicesReady) throw new Error("Services not ready");
+        const workspacePath = workspaceManager.getCurrentPath();
+        if (!workspacePath) throw new Error("No workspace open");
+        return resourceManager.readFile(workspacePath, params.path);
+      },
+
+      writeFile: async (params) => {
+        try {
+          if (!servicesReady) return { success: false, error: "Services not ready" };
+          const workspacePath = workspaceManager.getCurrentPath();
+          if (!workspacePath) return { success: false, error: "No workspace open" };
+          resourceManager.writeFile(workspacePath, params.path, params.content);
+          return { success: true };
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : String(err);
+          return { success: false, error: message };
+        }
+      },
+
+      listResourcePacks: async (params) => {
+        try {
+          if (!servicesReady) return [];
+          const instance = resolveServer(params.serverId);
+          return resourceManager.listResourcePacks(instance.path);
+        } catch {
+          return [];
+        }
+      },
+
+      createResourcePack: async (params) => {
+        try {
+          if (!servicesReady) return { success: false, error: "Services not ready" };
+          const instance = resolveServer(params.serverId);
+          const path = resourceManager.createResourcePack(
+            instance.path,
+            params.name,
+            params.description,
+            params.packFormat,
+          );
+          return { success: true, path };
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : String(err);
+          return { success: false, error: message };
+        }
+      },
+
+      copyResourcePackToServer: async (params) => {
+        try {
+          if (!servicesReady) return { success: false, error: "Services not ready" };
+          const instance = resolveServer(params.serverId);
+          resourceManager.copyToServer(params.packPath, instance.path);
+          return { success: true };
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : String(err);
+          return { success: false, error: message };
         }
       },
     },
@@ -529,6 +699,51 @@ const rpc = BrowserView.defineRPC<BlockDevRPC>({
 // ---------------------------------------------------------------------------
 // Helper: forward console output and server status to the renderer
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Line hook: parse TPS and player data from server output for monitoring
+// ---------------------------------------------------------------------------
+
+function onLineHook(serverId: string, line: string): void {
+  // TPS patterns: "TPS from last 1m, 5m, 15m: 20.0, 20.0, 20.0"
+  const tpsMatch = line.match(/TPS from last.*?:\s*([\d.]+)/);
+  if (tpsMatch) {
+    processMonitor.updateTPS(serverId, parseFloat(tpsMatch[1]));
+    return;
+  }
+
+  // Alternate TPS: "Current TPS: 20.0"
+  const altTpsMatch = line.match(/Current TPS:\s*([\d.]+)/i);
+  if (altTpsMatch) {
+    processMonitor.updateTPS(serverId, parseFloat(altTpsMatch[1]));
+    return;
+  }
+
+  // Player joined: "PlayerName joined the game" or "[Server] PlayerName[/ip:port] logged in"
+  const joinMatch = line.match(/(\w+)\[\/[\d.:]+\] logged in/);
+  if (joinMatch) {
+    // We don't track individual join/leave — rely on the list command output
+    return;
+  }
+
+  // Player list: "There are X of a max of Y players online: player1, player2"
+  const listMatch = line.match(/There are (\d+) of a max of \d+ players online:\s*(.*)/);
+  if (listMatch) {
+    const count = parseInt(listMatch[1], 10);
+    const players = listMatch[2]
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    processMonitor.updatePlayers(serverId, count, players);
+  }
+
+  // "There are X of a max of Y players online:" with empty list
+  const emptyListMatch = line.match(/There are (\d+) of a max of \d+ players online:?\s*$/);
+  if (emptyListMatch && !listMatch) {
+    const count = parseInt(emptyListMatch[1], 10);
+    processMonitor.updatePlayers(serverId, count, []);
+  }
+}
 
 function onConsole(serverId: string, message: ConsoleMessage): void {
   try {
@@ -593,6 +808,8 @@ try {
   serverController = new ServerController(javaManager);
   workspaceManager = new WorkspaceManager();
   fileWatcher = new FileWatcher();
+  processMonitor = new ProcessMonitor();
+  resourceManager = new ResourceManager();
   registry = createPluginRegistry();
 
   crashLog("Loading plugins...");
@@ -614,6 +831,7 @@ try {
 function cleanup(): void {
   if (!servicesReady) return;
   fileWatcher.unwatchAll();
+  processMonitor.stopAll();
   serverController.stopAll().catch((err) => {
     console.error("Error stopping servers during shutdown:", err);
   });

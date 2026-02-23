@@ -3,6 +3,8 @@ import { LuArrowLeft } from "react-icons/lu";
 import type { ConsoleMessage, RunningProcess } from "../../shared/types";
 import { GlassNav, Button } from "../components";
 import { Console } from "../components/Console";
+import { DevToolsPanel } from "../components/DevToolsPanel";
+import { ResourcePanel } from "../components/ResourcePanel";
 import { Sidebar } from "../components/Sidebar";
 import { ActionBar } from "../components/ActionBar";
 import { StatusBar } from "../components/StatusBar";
@@ -15,7 +17,7 @@ interface WorkspaceProps {
 
 type ServerStatus = "running" | "stopped" | "starting" | "stopping" | "error";
 
-const TABS = ["Console", "Actions", "Config", "World"];
+const TABS = ["Console", "Dev Tools", "Config", "Resources"];
 
 export function Workspace({ onBack }: WorkspaceProps) {
   const rpc = useRPC();
@@ -80,6 +82,8 @@ export function Workspace({ onBack }: WorkspaceProps) {
       cancelled = true;
     };
   }, [selectedServer]);
+
+  const handleClearConsole = () => setMessages([]);
 
   const handleCommand = async (cmd: string) => {
     // Show the user command in the console immediately
@@ -289,27 +293,23 @@ export function Workspace({ onBack }: WorkspaceProps) {
         {/* Content area */}
         <div className="flex-1 flex flex-col min-h-0 p-4">
           {activeTab === "Console" && (
-            <Console messages={messages} onCommand={handleCommand} />
+            <Console messages={messages} onCommand={handleCommand} onClear={handleClearConsole} />
           )}
-          {activeTab === "Actions" && (
-            <div className="flex-1 flex items-center justify-center text-text-dim text-sm">
-              Actions panel coming soon
-            </div>
+          {activeTab === "Dev Tools" && (
+            <DevToolsPanel serverId={selectedServer} serverStatus={serverStatus} />
           )}
           {activeTab === "Config" && (
             <div className="flex-1 flex items-center justify-center text-text-dim text-sm">
               Configuration editor coming soon
             </div>
           )}
-          {activeTab === "World" && (
-            <div className="flex-1 flex items-center justify-center text-text-dim text-sm">
-              World management coming soon
-            </div>
+          {activeTab === "Resources" && (
+            <ResourcePanel serverId={selectedServer} />
           )}
         </div>
 
         {/* ActionBar (shown on Console and Actions tabs) */}
-        {(activeTab === "Console" || activeTab === "Actions") && (
+        {(activeTab === "Console" || activeTab === "Dev Tools") && (
           <div className="shrink-0">
             <ActionBar
               serverStatus={serverStatus}

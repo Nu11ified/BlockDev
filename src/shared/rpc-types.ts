@@ -13,6 +13,11 @@ import type {
   BuildResult,
   ConsoleMessage,
   ReloadCapability,
+  ServerResourceStats,
+  ProcessInfo,
+  FileTreeEntry,
+  ResourcePackInfo,
+  FileContent,
 } from "./types";
 
 // === Bun-side requests (main process handles these) ===
@@ -97,6 +102,40 @@ type BunRequests = {
     params: { framework: string };
     response: ReloadCapability;
   };
+  // --- Dev Tools (Phase 2) ---
+  getServerResources: {
+    params: { serverId: string };
+    response: ServerResourceStats | null;
+  };
+  getProcessInfo: {
+    params: { serverId: string };
+    response: ProcessInfo | null;
+  };
+  // --- Resource/Texture Development (Phase 3) ---
+  listDirectory: {
+    params: { path: string; depth?: number };
+    response: FileTreeEntry[];
+  };
+  readFile: {
+    params: { path: string };
+    response: FileContent;
+  };
+  writeFile: {
+    params: { path: string; content: string };
+    response: { success: boolean; error?: string };
+  };
+  listResourcePacks: {
+    params: { serverId: string };
+    response: ResourcePackInfo[];
+  };
+  createResourcePack: {
+    params: { serverId: string; name: string; description: string; packFormat: number };
+    response: { success: boolean; path?: string; error?: string };
+  };
+  copyResourcePackToServer: {
+    params: { packPath: string; serverId: string };
+    response: { success: boolean; error?: string };
+  };
 };
 
 // === Bun-side messages (fire-and-forget from renderer to main) ===
@@ -113,6 +152,7 @@ type WebViewMessages = {
   downloadProgress: { framework: string; version: string; percent: number };
   fileChanged: { path: string; event: "add" | "change" | "unlink" };
   buildOutput: { projectId: string; line: string };
+  resourceStats: ServerResourceStats;
 };
 
 // === Combined RPC schema for Electrobun ===

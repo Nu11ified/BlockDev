@@ -18,6 +18,7 @@ interface ManagedServer {
   startedAt: number;
   onConsole: ConsoleCallback;
   onStatus: StatusCallback;
+  onLineHook?: (serverId: string, line: string) => void;
 }
 
 export class ServerController {
@@ -30,6 +31,7 @@ export class ServerController {
     provider: FrameworkProvider,
     onConsole: ConsoleCallback,
     onStatus: StatusCallback,
+    onLineHook?: (serverId: string, line: string) => void,
   ): Promise<void> {
     if (this.servers.has(instance.id)) {
       throw new Error(`Server ${instance.id} is already running.`);
@@ -58,6 +60,7 @@ export class ServerController {
       startedAt: Date.now(),
       onConsole,
       onStatus,
+      onLineHook,
     };
 
     this.servers.set(instance.id, managed);
@@ -133,6 +136,7 @@ export class ServerController {
     serverId: string,
     onConsole: ConsoleCallback,
     onStatus: StatusCallback,
+    onLineHook?: (serverId: string, line: string) => void,
   ): Promise<void> {
     const server = this.servers.get(serverId);
     if (!server) {
@@ -141,7 +145,7 @@ export class ServerController {
 
     const { instance, provider } = server;
     await this.stop(serverId);
-    await this.start(instance, provider, onConsole, onStatus);
+    await this.start(instance, provider, onConsole, onStatus, onLineHook);
   }
 
   async sendCommand(serverId: string, command: string): Promise<void> {
@@ -216,6 +220,7 @@ export class ServerController {
             source,
             text: line,
           });
+          server.onLineHook?.(serverId, line);
         }
       }
 
