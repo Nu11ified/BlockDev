@@ -3,7 +3,7 @@ import {
   LuArrowLeft,
   LuServer,
   LuBox,
-  LuCode2,
+  LuCode,
   LuCheck,
   LuFolderOpen,
   LuLoader,
@@ -33,7 +33,7 @@ interface FrameworkOption {
 const frameworkIconMap: Record<string, React.ComponentType<{ className?: string }>> = {
   paper: LuServer,
   fabric: LuBox,
-  kubejs: LuCode2,
+  kubejs: LuCode,
 };
 
 const stepNames = ["Framework", "Version", "Details"];

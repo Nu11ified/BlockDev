@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { LuPlus, LuFolderOpen, LuServer, LuBox, LuCode2, LuLoader } from "react-icons/lu";
+import { LuPlus, LuFolderOpen, LuServer, LuBox, LuCode, LuLoader } from "react-icons/lu";
 import { Button, Card, SectionLabel } from "../components";
 import { useRPC } from "../hooks/useRPC";
 import type { RecentWorkspace } from "../../shared/types";
@@ -12,7 +12,7 @@ interface HomeProps {
 const frameworkIcons: Record<string, React.ComponentType<{ className?: string }>> = {
   paper: LuServer,
   fabric: LuBox,
-  kubejs: LuCode2,
+  kubejs: LuCode,
 };
 
 function formatRelativeTime(timestamp: number): string {

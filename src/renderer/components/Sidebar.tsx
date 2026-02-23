@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { LuServer, LuBox, LuCode2, LuChevronDown, LuChevronRight } from "react-icons/lu";
+import { LuServer, LuBox, LuCode, LuChevronDown, LuChevronRight } from "react-icons/lu";
 import { SectionLabel } from "./SectionLabel";
 import { StatusDot } from "./StatusDot";
 
@@ -29,7 +29,7 @@ interface SidebarProps {
 const frameworkIcons: Record<string, React.ComponentType<{ className?: string }>> = {
   paper: LuServer,
   fabric: LuBox,
-  kubejs: LuCode2,
+  kubejs: LuCode,
 };
 
 const frameworkLabels: Record<string, string> = {
@@ -118,7 +118,7 @@ export function Sidebar({
                       : "text-text-muted hover:bg-card"
                   }`}
                 >
-                  <LuCode2 className="text-sm shrink-0" />
+                  <LuCode className="text-sm shrink-0" />
                   <span className="text-sm truncate">{project.name}</span>
                 </button>
               );

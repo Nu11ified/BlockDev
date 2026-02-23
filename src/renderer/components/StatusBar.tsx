@@ -1,6 +1,6 @@
 import React from "react";
 import { StatusDot } from "./StatusDot";
-import { LuCode2, LuEye } from "react-icons/lu";
+import { LuCode, LuEye } from "react-icons/lu";
 
 interface StatusBarProps {
   serverStatus: "running" | "stopped" | "starting" | "stopping" | "error";
@@ -32,7 +32,7 @@ export function StatusBar({
       </div>
       <div className="flex items-center gap-4">
         <div className="flex items-center gap-1.5 text-text-dim">
-          <LuCode2 className="text-xs" />
+          <LuCode className="text-xs" />
           <span>
             {projectCount} {projectCount === 1 ? "project" : "projects"}
           </span>

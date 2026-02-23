@@ -40,7 +40,7 @@ interface ModrinthVersion {
 export class KubeJSProvider implements FrameworkProvider {
   readonly id = "kubejs";
   readonly name = "KubeJS Modpack";
-  readonly icon = "LuCode2";
+  readonly icon = "LuCode";
   readonly description = "Script-based Minecraft modding with hot reload";
 
   private downloadManager = new DownloadManager();
