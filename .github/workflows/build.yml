@@ -100,19 +100,50 @@ jobs:
           ELECTROBUN_TEAMID: ${{ secrets.ELECTROBUN_TEAMID }}
         run: bunx electrobun build --env=stable --targets=$BUILD_TARGETS
 
-      - name: Upload artifacts
+      # Electrobun outputs distributable files to artifacts/ with names like:
+      #   stable-macos-arm64-BlockDev.dmg
+      #   stable-linux-x64-BlockDev.tar.gz
+      #   stable-win-x64-BlockDev-Setup.exe
+      # Only upload the user-facing distributables (DMG, tar.gz, exe, zip).
+      - name: List build outputs
+        shell: bash
+        run: |
+          echo "=== artifacts/ ==="
+          ls -lah artifacts/ 2>/dev/null || echo "(no artifacts/ directory)"
+          echo "=== build/ ==="
+          ls -lah build/ 2>/dev/null || echo "(no build/ directory)"
+
+      - name: Upload release artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact-name }}
           path: |
-            build/
-            dist/
-          if-no-files-found: error
+            artifacts/*.dmg
+            artifacts/*.tar.gz
+            artifacts/*.tar.zst
+            artifacts/*.exe
+            artifacts/*.zip
+            artifacts/*-Setup*
+          if-no-files-found: warn
+
+      # Fallback: if Electrobun doesn't use artifacts/, upload from build/
+      - name: Upload build fallback
+        if: hashFiles('artifacts/') == ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact-name }}-fallback
+          path: |
+            build/**/*.dmg
+            build/**/*.app
+            build/**/*.tar.gz
+            build/**/*.tar.zst
+            build/**/*.exe
+            build/**/*.zip
+            build/**/*-Setup*
+          if-no-files-found: warn
 
   # --------------------------------------------------------------------
   # Auto-release — only runs on push to main after all builds succeed
-  # Determines the next version by bumping the patch of the latest tag,
-  # creates a new tag, and publishes a GitHub Release with all artifacts.
   # --------------------------------------------------------------------
   release:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -129,7 +160,6 @@ jobs:
       - name: Determine next version
         id: version
         run: |
-          # Get the latest version tag, default to v0.0.0 if none exist
           LATEST_TAG=$(git tag -l 'v*' --sort=-v:refname | head -1)
           if [ -z "$LATEST_TAG" ]; then
             LATEST_TAG="v0.0.0"
@@ -137,11 +167,9 @@ jobs:
 
           echo "Latest tag: $LATEST_TAG"
 
-          # Strip the 'v' prefix and any pre-release suffix
           SEMVER="${LATEST_TAG#v}"
           SEMVER="${SEMVER%%-*}"
 
-          # Split into major.minor.patch
           IFS='.' read -r MAJOR MINOR PATCH <<< "$SEMVER"
           PATCH=$((PATCH + 1))
           NEXT_VERSION="v${MAJOR}.${MINOR}.${PATCH}"
@@ -161,6 +189,25 @@ jobs:
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+
+      - name: List downloaded assets
+        run: find release-assets -type f | head -50
+
+      # Flatten all artifacts into a single directory for clean release
+      - name: Prepare release files
+        run: |
+          mkdir -p release-files
+          find release-assets -type f \( \
+            -name "*.dmg" -o \
+            -name "*.tar.gz" -o \
+            -name "*.tar.zst" -o \
+            -name "*.exe" -o \
+            -name "*.zip" \
+          \) -exec cp {} release-files/ \;
+          echo "Release files:"
+          ls -lah release-files/
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -180,7 +227,4 @@ jobs:
 
             > **macOS users:** The install script handles Gatekeeper automatically.
             > If you download manually, run: `xattr -cr /Applications/BlockDev.app`
-          files: |
-            blockdev-macos/**/*
-            blockdev-linux/**/*
-            blockdev-windows/**/*
+          files: release-files/*

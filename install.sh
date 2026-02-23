@@ -27,7 +27,7 @@ detect_platform() {
   arch="$(uname -m)"
 
   case "$os" in
-    Darwin) OS="mac" ;;
+    Darwin) OS="macos" ;;
     Linux)  OS="linux" ;;
     MINGW*|MSYS*|CYGWIN*) OS="win" ;;
     *) error "Unsupported OS: $os"; exit 1 ;;
@@ -56,14 +56,15 @@ get_latest_version() {
 }
 
 # Download the release asset
+# Electrobun names files: stable-{os}-{arch}-{AppName}.{ext}
 download() {
   local url="https://github.com/$REPO/releases/download/$VERSION"
   local filename
 
   case "$OS" in
-    mac)   filename="${APP_NAME}-${VERSION}-${OS}-${ARCH}.dmg" ;;
-    linux) filename="${APP_NAME}-${VERSION}-${OS}-${ARCH}.tar.gz" ;;
-    win)   filename="${APP_NAME}-${VERSION}-${OS}-${ARCH}.zip" ;;
+    macos) filename="stable-${OS}-${ARCH}-${APP_NAME}.dmg" ;;
+    linux) filename="stable-${OS}-${ARCH}-${APP_NAME}.tar.gz" ;;
+    win)   filename="stable-${OS}-${ARCH}-${APP_NAME}-Setup.exe" ;;
   esac
 
   DOWNLOAD_URL="$url/$filename"
@@ -71,9 +72,31 @@ download() {
 
   info "Downloading $filename..."
   if ! curl -fSL --progress-bar "$DOWNLOAD_URL" -o "$DOWNLOAD_PATH"; then
-    error "Download failed. Check that a release exists at:"
-    error "  $DOWNLOAD_URL"
-    exit 1
+    # Fallback: try listing available assets
+    warn "Asset not found with expected name. Checking available assets..."
+    local assets
+    assets=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" \
+      | grep '"browser_download_url"' | sed 's/.*"browser_download_url": "//;s/".*//')
+
+    # Find a matching asset for our platform
+    local match
+    match=$(echo "$assets" | grep -i "$OS" | grep -i "$ARCH" | head -1)
+
+    if [ -n "$match" ]; then
+      filename=$(basename "$match")
+      DOWNLOAD_URL="$match"
+      DOWNLOAD_PATH="/tmp/$filename"
+      info "Found matching asset: $filename"
+      curl -fSL --progress-bar "$DOWNLOAD_URL" -o "$DOWNLOAD_PATH" || {
+        error "Download failed."
+        exit 1
+      }
+    else
+      error "No matching asset found for $OS $ARCH."
+      error "Available assets:"
+      echo "$assets" | while read -r a; do error "  $(basename "$a")"; done
+      exit 1
+    fi
   fi
 
   ok "Downloaded to $DOWNLOAD_PATH"
@@ -121,7 +144,11 @@ install_linux() {
   info "Installing to $install_dir..."
   mkdir -p "$install_dir" "$bin_dir"
 
-  tar -xzf "$DOWNLOAD_PATH" -C "$install_dir"
+  # Handle both .tar.gz and .tar.zst archives
+  case "$DOWNLOAD_PATH" in
+    *.tar.zst) zstd -dc "$DOWNLOAD_PATH" | tar -xf - -C "$install_dir" ;;
+    *)         tar -xzf "$DOWNLOAD_PATH" -C "$install_dir" ;;
+  esac
 
   # Create a launcher symlink
   ln -sf "$install_dir/blockdev" "$bin_dir/blockdev"
@@ -175,7 +202,7 @@ main() {
   download
 
   case "$OS" in
-    mac)   install_mac ;;
+    macos) install_mac ;;
     linux) install_linux ;;
     win)   install_win ;;
   esac
