@@ -1,0 +1,155 @@
+# BlockDev Release Workflow
+#
+# Triggered when a version tag (v*) is pushed. Builds BlockDev for all
+# three platforms (macOS, Linux, Windows) and creates a GitHub Release
+# with the resulting artifacts attached.
+#
+# Examples of matching tags: v0.1.0, v1.0.0, v2.3.1-beta.1
+# Pre-release detection: tags containing a hyphen (e.g., v0.1.0-beta.1)
+# are automatically marked as pre-releases.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+# Don't cancel release builds — every tagged release should complete
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+# Write permission required to create GitHub Releases
+permissions:
+  contents: write
+
+jobs:
+  # --------------------------------------------------------------------
+  # Build — identical matrix to build.yml
+  # Produces platform-specific artifacts for the release job to collect.
+  # --------------------------------------------------------------------
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS builds both arm64 and x64 targets
+          - os: macos-latest
+            targets: macos-arm64,macos-x64
+            artifact-name: blockdev-macos
+          # Linux builds x64 only
+          - os: ubuntu-latest
+            targets: linux-x64
+            artifact-name: blockdev-linux
+          # Windows builds x64 only
+          - os: windows-latest
+            targets: win-x64
+            artifact-name: blockdev-windows
+
+    runs-on: ${{ matrix.os }}
+    name: Build (${{ matrix.os }})
+
+    steps:
+      # ------------------------------------------------------------------
+      # 1. Checkout repository
+      # ------------------------------------------------------------------
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ------------------------------------------------------------------
+      # 2. Install Bun runtime
+      # ------------------------------------------------------------------
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      # ------------------------------------------------------------------
+      # 3. Install project dependencies
+      # ------------------------------------------------------------------
+      - name: Install dependencies
+        run: bun install
+
+      # ------------------------------------------------------------------
+      # 4. Download Eclipse Temurin JRE 21
+      #    macOS/Linux use the shared fetch-jre.sh script.
+      #    Windows uses PowerShell (the Adoptium API returns a .zip).
+      # ------------------------------------------------------------------
+      - name: Download JRE (macOS/Linux)
+        if: runner.os != 'Windows'
+        run: bash scripts/fetch-jre.sh
+
+      - name: Download JRE (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $jreDir = Join-Path $env:GITHUB_WORKSPACE "jre"
+          New-Item -ItemType Directory -Force -Path $jreDir | Out-Null
+
+          $url = "https://api.adoptium.net/v3/binary/latest/21/ga/windows/x64/jre/hotspot/normal/eclipse"
+          $archive = Join-Path $jreDir "temurin-21.zip"
+
+          Write-Host "Downloading Temurin JRE 21 for Windows/x64..."
+          Invoke-WebRequest -Uri $url -OutFile $archive
+
+          Write-Host "Extracting..."
+          Expand-Archive -Path $archive -DestinationPath $jreDir -Force
+          Remove-Item $archive
+
+          Write-Host "JRE downloaded to $jreDir"
+
+      # ------------------------------------------------------------------
+      # 5. Build with Electrobun (stable environment)
+      # ------------------------------------------------------------------
+      - name: Build BlockDev
+        env:
+          BUILD_TARGETS: ${{ matrix.targets }}
+        run: bunx electrobun build --env=stable --targets=$BUILD_TARGETS
+
+      # ------------------------------------------------------------------
+      # 6. Upload build artifacts for the release job to collect
+      # ------------------------------------------------------------------
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact-name }}
+          path: |
+            build/
+            dist/
+          if-no-files-found: error
+
+  # --------------------------------------------------------------------
+  # Release — runs after all platform builds succeed
+  # Downloads every artifact and attaches them to a new GitHub Release.
+  # --------------------------------------------------------------------
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    name: Create GitHub Release
+
+    steps:
+      # ------------------------------------------------------------------
+      # 1. Download all platform artifacts produced by the build matrix
+      # ------------------------------------------------------------------
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+
+      # ------------------------------------------------------------------
+      # 2. Create GitHub Release
+      #    - Release name uses the full tag (e.g., "BlockDev v0.1.0")
+      #    - Pre-release flag is set automatically when the tag contains
+      #      a hyphen (e.g., v0.1.0-beta.1)
+      #    - Release notes are auto-generated from commits since the
+      #      previous release tag
+      # ------------------------------------------------------------------
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: BlockDev ${{ github.ref_name }}
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: true
+          files: |
+            blockdev-macos/*
+            blockdev-linux/*
+            blockdev-windows/*
