@@ -104,12 +104,11 @@ export class ServerController {
     server.status = "stopping";
     server.onStatus(serverId, "stopping");
 
-    // Send the stop command via stdin
+    // Send the stop command via stdin (Bun's stdin is a FileSink, not a WritableStream)
     const stopCommand = server.provider.getStopCommand();
     if (server.process.stdin) {
-      const writer = server.process.stdin.getWriter();
-      await writer.write(new TextEncoder().encode(stopCommand + "\n"));
-      writer.releaseLock();
+      server.process.stdin.write(stopCommand + "\n");
+      server.process.stdin.flush();
     }
 
     // Wait up to 15 seconds for graceful shutdown, then force kill
@@ -155,9 +154,8 @@ export class ServerController {
     }
 
     if (server.process.stdin) {
-      const writer = server.process.stdin.getWriter();
-      await writer.write(new TextEncoder().encode(command + "\n"));
-      writer.releaseLock();
+      server.process.stdin.write(command + "\n");
+      server.process.stdin.flush();
     }
   }
 
