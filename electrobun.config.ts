@@ -19,7 +19,10 @@ export default {
       "src/renderer/index.html": "views/mainview/index.html",
       "src/renderer/index.css": "views/mainview/index.css",
     },
-    mac: {},
+    mac: {
+      codesign: !!process.env.ELECTROBUN_DEVELOPER_ID,
+      notarize: !!process.env.ELECTROBUN_APPLEID,
+    },
     linux: {},
     win: {},
   },

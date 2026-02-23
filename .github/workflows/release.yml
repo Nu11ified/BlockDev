@@ -99,15 +99,44 @@ jobs:
           echo "Injected version: ${VERSION}"
 
       # ------------------------------------------------------------------
-      # 6. Build with Electrobun (stable environment)
+      # 6. Import macOS signing certificate (skipped when secrets are not set)
+      # ------------------------------------------------------------------
+      - name: Import signing certificate
+        if: runner.os == 'macOS' && env.MACOS_CERTIFICATE != ''
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+        shell: bash
+        run: |
+          CERT_FILE=$(mktemp /tmp/cert.XXXXXX.p12)
+          KEYCHAIN_FILE=$(mktemp /tmp/keychain.XXXXXX.keychain-db)
+          KEYCHAIN_PWD=$(openssl rand -base64 24)
+
+          echo "$MACOS_CERTIFICATE" | base64 --decode > "$CERT_FILE"
+
+          security create-keychain -p "$KEYCHAIN_PWD" "$KEYCHAIN_FILE"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_FILE"
+          security unlock-keychain -p "$KEYCHAIN_PWD" "$KEYCHAIN_FILE"
+          security import "$CERT_FILE" -P "$MACOS_CERTIFICATE_PWD" -A -t cert -f pkcs12 -k "$KEYCHAIN_FILE"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PWD" "$KEYCHAIN_FILE"
+          security list-keychains -d user -s "$KEYCHAIN_FILE" login.keychain-db
+
+          rm "$CERT_FILE"
+
+      # ------------------------------------------------------------------
+      # 7. Build with Electrobun (stable environment)
       # ------------------------------------------------------------------
       - name: Build BlockDev
         env:
           BUILD_TARGETS: ${{ matrix.targets }}
+          ELECTROBUN_DEVELOPER_ID: ${{ secrets.ELECTROBUN_DEVELOPER_ID }}
+          ELECTROBUN_APPLEID: ${{ secrets.ELECTROBUN_APPLEID }}
+          ELECTROBUN_APPLEIDPASS: ${{ secrets.ELECTROBUN_APPLEIDPASS }}
+          ELECTROBUN_TEAMID: ${{ secrets.ELECTROBUN_TEAMID }}
         run: bunx electrobun build --env=stable --targets=$BUILD_TARGETS
 
       # ------------------------------------------------------------------
-      # 7. Upload build artifacts for the release job to collect
+      # 8. Upload build artifacts for the release job to collect
       # ------------------------------------------------------------------
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -164,6 +193,13 @@ jobs:
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
           generate_release_notes: true
+          append_body: true
+          body: |
+            > **macOS users:** If you see "BlockDev is damaged and can't be opened", run this in Terminal:
+            > ```
+            > xattr -cr /path/to/BlockDev.app
+            > ```
+            > This is normal for unsigned builds. Full code signing is coming soon.
           files: |
             blockdev-macos/*
             blockdev-linux/*
