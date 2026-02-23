@@ -37,6 +37,10 @@ type BunRequests = {
     params: { path: string };
     response: { manifest: WorkspaceManifest | null; error?: string };
   };
+  getCurrentWorkspace: {
+    params: {};
+    response: WorkspaceManifest | null;
+  };
   getRecentWorkspaces: {
     params: {};
     response: RecentWorkspace[];

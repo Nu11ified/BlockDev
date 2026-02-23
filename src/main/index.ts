@@ -179,6 +179,15 @@ const rpc = BrowserView.defineRPC<BlockDevRPC>({
         }
       },
 
+      getCurrentWorkspace: async () => {
+        try {
+          if (!servicesReady) return null;
+          return workspaceManager.getCurrent();
+        } catch {
+          return null;
+        }
+      },
+
       getRecentWorkspaces: async () => {
         try {
           if (!servicesReady) return [];

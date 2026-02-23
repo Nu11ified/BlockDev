@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { LuArrowLeft } from "react-icons/lu";
-import type { ConsoleMessage, RunningProcess } from "../../shared/types";
+import type { ConsoleMessage, RunningProcess, WorkspaceManifest } from "../../shared/types";
 import { GlassNav, Button } from "../components";
 import { Console } from "../components/Console";
 import { DevToolsPanel } from "../components/DevToolsPanel";
@@ -22,25 +22,56 @@ const TABS = ["Console", "Dev Tools", "Config", "Resources"];
 export function Workspace({ onBack }: WorkspaceProps) {
   const rpc = useRPC();
   const [activeTab, setActiveTab] = useState("Console");
-  const [selectedServer, setSelectedServer] = useState("paper-main");
-  const [selectedProject, setSelectedProject] = useState<string | undefined>(
-    "my-plugin"
-  );
+  const [manifest, setManifest] = useState<WorkspaceManifest | null>(null);
+  const [selectedServer, setSelectedServer] = useState<string | null>(null);
+  const [selectedProject, setSelectedProject] = useState<string | undefined>();
   const [messages, setMessages] = useState<ConsoleMessage[]>([]);
   const [serverStatus, setServerStatus] = useState<ServerStatus>("stopped");
   const [autoDeployEnabled, setAutoDeployEnabled] = useState(false);
 
-  // Placeholder servers/projects (will be populated from workspace manifest later)
-  const servers = [
-    {
-      id: "paper-main",
-      name: "Paper Dev Server",
-      framework: "paper",
-      status: serverStatus,
-    },
-  ];
+  // Fetch the current workspace manifest on mount
+  useEffect(() => {
+    let cancelled = false;
 
-  const projects = [{ id: "my-plugin", name: "MyPlugin" }];
+    async function fetchManifest() {
+      try {
+        const ws = await rpc.request("getCurrentWorkspace", {});
+        if (!cancelled && ws) {
+          setManifest(ws);
+          // Auto-select the first server and project
+          if (ws.servers.length > 0 && !selectedServer) {
+            setSelectedServer(ws.servers[0].id);
+          }
+          if (ws.projects.length > 0 && !selectedProject) {
+            setSelectedProject(ws.projects[0].id);
+          }
+        }
+      } catch (err) {
+        console.error("Failed to fetch workspace manifest:", err);
+      }
+    }
+
+    fetchManifest();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Derive sidebar data from manifest
+  const servers = (manifest?.servers ?? []).map((s) => ({
+    id: s.id,
+    name: `${s.framework.charAt(0).toUpperCase() + s.framework.slice(1)} ${s.mcVersion}`,
+    framework: s.framework,
+    status: serverStatus,
+  }));
+
+  const projects = (manifest?.projects ?? []).map((p) => ({
+    id: p.id,
+    name: p.id,
+  }));
+
+  const currentServer = manifest?.servers.find((s) => s.id === selectedServer);
+  const serverDisplayName = currentServer
+    ? `${currentServer.framework.charAt(0).toUpperCase() + currentServer.framework.slice(1)} ${currentServer.mcVersion}`
+    : manifest?.name || "Workspace";
 
   // Subscribe to console output from main process
   useEffect(() => {
@@ -62,12 +93,13 @@ export function Workspace({ onBack }: WorkspaceProps) {
 
   // Fetch initial server status on mount and when selected server changes
   useEffect(() => {
+    if (!selectedServer) return;
     let cancelled = false;
 
     async function fetchStatus() {
       try {
         const status = await rpc.request("getServerStatus", {
-          serverId: selectedServer,
+          serverId: selectedServer!,
         });
         if (!cancelled && status) {
           setServerStatus(status.status);
@@ -86,6 +118,7 @@ export function Workspace({ onBack }: WorkspaceProps) {
   const handleClearConsole = () => setMessages([]);
 
   const handleCommand = async (cmd: string) => {
+    if (!selectedServer) return;
     // Show the user command in the console immediately
     setMessages((prev) => [
       ...prev,
@@ -116,6 +149,7 @@ export function Workspace({ onBack }: WorkspaceProps) {
   };
 
   const handleStart = async () => {
+    if (!selectedServer) return;
     setServerStatus("starting");
     try {
       const result = await rpc.request("startServer", {
@@ -140,6 +174,7 @@ export function Workspace({ onBack }: WorkspaceProps) {
   };
 
   const handleStop = async () => {
+    if (!selectedServer) return;
     setServerStatus("stopping");
     try {
       const result = await rpc.request("stopServer", {
@@ -162,6 +197,7 @@ export function Workspace({ onBack }: WorkspaceProps) {
   };
 
   const handleRestart = async () => {
+    if (!selectedServer) return;
     setServerStatus("starting");
     try {
       const result = await rpc.request("restartServer", {
@@ -208,7 +244,7 @@ export function Workspace({ onBack }: WorkspaceProps) {
   };
 
   const handleDeploy = async () => {
-    if (!selectedProject) return;
+    if (!selectedProject || !selectedServer) return;
     try {
       const result = await rpc.request("deployProject", {
         projectId: selectedProject,
@@ -231,6 +267,7 @@ export function Workspace({ onBack }: WorkspaceProps) {
   };
 
   const handleReload = async () => {
+    if (!selectedServer) return;
     try {
       const result = await rpc.request("reloadServer", {
         serverId: selectedServer,
@@ -252,6 +289,7 @@ export function Workspace({ onBack }: WorkspaceProps) {
   };
 
   const handleToggleAutoDeploy = () => {
+    if (!selectedServer) return;
     const newValue = !autoDeployEnabled;
     setAutoDeployEnabled(newValue);
     rpc.send("setAutoDeployEnabled", {
@@ -266,7 +304,7 @@ export function Workspace({ onBack }: WorkspaceProps) {
       <Sidebar
         servers={servers}
         projects={projects}
-        selectedServer={selectedServer}
+        selectedServer={selectedServer ?? undefined}
         selectedProject={selectedProject}
         onSelectServer={setSelectedServer}
         onSelectProject={(id) => setSelectedProject(id)}
@@ -281,7 +319,7 @@ export function Workspace({ onBack }: WorkspaceProps) {
           </Button>
           <div className="h-4 w-px bg-border-subtle" />
           <h2 className="text-sm font-medium text-text-primary truncate">
-            Paper Dev Server
+            {serverDisplayName}
           </h2>
         </GlassNav>
 
@@ -295,7 +333,7 @@ export function Workspace({ onBack }: WorkspaceProps) {
           {activeTab === "Console" && (
             <Console messages={messages} onCommand={handleCommand} onClear={handleClearConsole} />
           )}
-          {activeTab === "Dev Tools" && (
+          {activeTab === "Dev Tools" && selectedServer && (
             <DevToolsPanel serverId={selectedServer} serverStatus={serverStatus} />
           )}
           {activeTab === "Config" && (
@@ -303,12 +341,12 @@ export function Workspace({ onBack }: WorkspaceProps) {
               Configuration editor coming soon
             </div>
           )}
-          {activeTab === "Resources" && (
+          {activeTab === "Resources" && selectedServer && (
             <ResourcePanel serverId={selectedServer} />
           )}
         </div>
 
-        {/* ActionBar (shown on Console and Actions tabs) */}
+        {/* ActionBar (shown on Console and Dev Tools tabs) */}
         {(activeTab === "Console" || activeTab === "Dev Tools") && (
           <div className="shrink-0">
             <ActionBar
@@ -330,9 +368,9 @@ export function Workspace({ onBack }: WorkspaceProps) {
         <div className="shrink-0">
           <StatusBar
             serverStatus={serverStatus}
-            serverName="Paper Dev Server"
+            serverName={serverDisplayName}
             projectCount={projects.length}
-            watchedFiles={24}
+            watchedFiles={0}
           />
         </div>
       </div>
