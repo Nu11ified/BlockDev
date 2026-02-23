@@ -23,6 +23,7 @@ export default {
     mac: {
       codesign: !!process.env.ELECTROBUN_DEVELOPER_ID,
       notarize: !!process.env.ELECTROBUN_APPLEID,
+      icons: "icon.iconset",
     },
     linux: {
       icon: "assets/logo.png",
