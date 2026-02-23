@@ -38,6 +38,7 @@ const listeners = {
 // --- Module-level RPC singleton ---
 
 const rpc = Electroview.defineRPC<BlockDevRPC>({
+  maxRequestTime: 5 * 60 * 1000, // 5 minutes — downloads can be slow
   handlers: {
     messages: {
       consoleOutput: (message) => {
