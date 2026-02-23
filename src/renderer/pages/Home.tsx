@@ -71,9 +71,12 @@ export function Home({ onCreateWorkspace, onOpenWorkspace }: HomeProps) {
   return (
     <div className="flex flex-col items-center justify-center min-h-screen gap-10 p-8">
       <div className="flex flex-col items-center gap-4">
-        <div className="w-20 h-20 bg-white rounded-xl flex items-center justify-center transition-transform duration-300 hover:rotate-12">
-          <span className="text-black text-3xl font-bold select-none">B.</span>
-        </div>
+        <img
+          src="views://mainview/logo.png"
+          alt="BlockDev"
+          className="w-24 h-24 rounded-xl transition-transform duration-300 hover:rotate-12 select-none"
+          draggable={false}
+        />
         <div className="text-center">
           <h1 className="text-5xl font-bold">BlockDev</h1>
           <p className="text-text-muted text-sm mt-1">
