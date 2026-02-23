@@ -177,7 +177,7 @@ export function CreateWorkspace({ onBack, onCreate }: CreateWorkspaceProps) {
   }
 
   return (
-    <div className="min-h-screen flex flex-col p-8 max-w-3xl mx-auto">
+    <div className="h-screen flex flex-col p-8 max-w-3xl mx-auto overflow-hidden">
       {/* Header */}
       <div className="flex items-center gap-4 mb-8">
         <button
@@ -225,7 +225,7 @@ export function CreateWorkspace({ onBack, onCreate }: CreateWorkspaceProps) {
       </div>
 
       {/* Step Content */}
-      <div className="flex-1">
+      <div className="flex-1 overflow-y-auto min-h-0">
         {/* Step 1: Select Framework */}
         <div
           className={`transition-all duration-500 ${
@@ -479,8 +479,8 @@ export function CreateWorkspace({ onBack, onCreate }: CreateWorkspaceProps) {
         </div>
       </div>
 
-      {/* Navigation Buttons */}
-      <div className="flex justify-between items-center mt-10 pt-6 border-t border-border-subtle">
+      {/* Navigation Buttons — pinned at bottom */}
+      <div className="flex justify-between items-center pt-6 mt-auto border-t border-border-subtle shrink-0">
         <div>
           {step > 0 && (
             <Button variant="ghost" icon={LuArrowLeft} onClick={handleBack}>

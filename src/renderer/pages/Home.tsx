@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { LuPlus, LuFolderOpen, LuServer, LuBox, LuCode, LuLoader } from "react-icons/lu";
+import { LuPlus, LuFolderOpen, LuServer, LuBox, LuCode, LuLoader, LuArrowRight } from "react-icons/lu";
 import { Button, Card, SectionLabel } from "../components";
 import { useRPC } from "../hooks/useRPC";
 import type { RecentWorkspace } from "../../shared/types";
@@ -41,6 +41,8 @@ export function Home({ onCreateWorkspace, onOpenWorkspace }: HomeProps) {
   const rpc = useRPC();
   const [recentWorkspaces, setRecentWorkspaces] = useState<RecentWorkspace[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showPathInput, setShowPathInput] = useState(false);
+  const [pathValue, setPathValue] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -80,17 +82,46 @@ export function Home({ onCreateWorkspace, onOpenWorkspace }: HomeProps) {
         </div>
       </div>
 
-      <div className="flex gap-3">
-        <Button variant="primary" icon={LuPlus} onClick={onCreateWorkspace}>
-          Create Workspace
-        </Button>
-        <Button
-          variant="secondary"
-          icon={LuFolderOpen}
-          onClick={() => onOpenWorkspace("")}
-        >
-          Open Workspace
-        </Button>
+      <div className="flex flex-col items-center gap-3">
+        <div className="flex gap-3">
+          <Button variant="primary" icon={LuPlus} onClick={onCreateWorkspace}>
+            Create Workspace
+          </Button>
+          <Button
+            variant="secondary"
+            icon={LuFolderOpen}
+            onClick={() => setShowPathInput(!showPathInput)}
+          >
+            Open Workspace
+          </Button>
+        </div>
+
+        {showPathInput && (
+          <div className="flex gap-2 w-full max-w-md mt-1">
+            <input
+              type="text"
+              value={pathValue}
+              onChange={(e) => setPathValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && pathValue.trim()) {
+                  onOpenWorkspace(pathValue.trim());
+                }
+              }}
+              placeholder="/path/to/workspace"
+              autoFocus
+              className="flex-1 px-4 py-2.5 rounded-xl bg-card border border-border-subtle text-text-primary text-sm font-mono placeholder:text-text-disabled focus:outline-none focus:border-accent transition-colors duration-300"
+            />
+            <button
+              onClick={() => {
+                if (pathValue.trim()) onOpenWorkspace(pathValue.trim());
+              }}
+              disabled={!pathValue.trim()}
+              className="px-4 py-2.5 rounded-xl bg-accent text-black text-sm font-medium disabled:opacity-40 hover:bg-accent-hover transition-all duration-300 cursor-pointer disabled:cursor-not-allowed"
+            >
+              <LuArrowRight />
+            </button>
+          </div>
+        )}
       </div>
 
       {loading && (

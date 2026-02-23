@@ -23,10 +23,8 @@ export function App() {
         <Home
           onCreateWorkspace={() => setPage("create")}
           onOpenWorkspace={(path) => {
-            if (path) {
-              setWorkspaceConfig({ name: "", path, framework: "", mcVersion: "", build: "" });
-              setPage("workspace");
-            }
+            setWorkspaceConfig({ name: "", path, framework: "", mcVersion: "", build: "" });
+            setPage("workspace");
           }}
         />
       )}
