@@ -18,6 +18,9 @@ import type {
   FileTreeEntry,
   ResourcePackInfo,
   FileContent,
+  ProjectEntry,
+  ProjectTemplate,
+  AutoDeployEvent,
 } from "./types";
 
 // === Bun-side requests (main process handles these) ===
@@ -140,6 +143,27 @@ type BunRequests = {
     params: { packPath: string; serverId: string };
     response: { success: boolean; error?: string };
   };
+  // --- Project scaffolding & editor (Phase 4) ---
+  createProject: {
+    params: {
+      template: ProjectTemplate;
+      name: string;
+      mcVersion: string;
+      packageName?: string;
+    };
+    response: { success: boolean; projectId?: string; error?: string };
+  };
+  openInEditor: {
+    params: {
+      projectPath: string;
+      editor: "vscode" | "intellij" | "cursor" | "zed";
+    };
+    response: { success: boolean; error?: string };
+  };
+  getProjects: {
+    params: {};
+    response: ProjectEntry[];
+  };
 };
 
 // === Bun-side messages (fire-and-forget from renderer to main) ===
@@ -157,6 +181,7 @@ type WebViewMessages = {
   fileChanged: { path: string; event: "add" | "change" | "unlink" };
   buildOutput: { projectId: string; line: string };
   resourceStats: ServerResourceStats;
+  autoDeployStatus: AutoDeployEvent;
 };
 
 // === Combined RPC schema for Electrobun ===

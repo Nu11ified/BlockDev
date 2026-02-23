@@ -14,3 +14,5 @@ export { FileTree } from "./FileTree";
 export { FilePreview } from "./FilePreview";
 export { ResourcePackList } from "./ResourcePackList";
 export { CreateResourcePackDialog } from "./CreateResourcePackDialog";
+export { CreateProjectDialog } from "./CreateProjectDialog";
+export { ProjectsPanel } from "./ProjectsPanel";

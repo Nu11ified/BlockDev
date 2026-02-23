@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { LuServer, LuBox, LuCode, LuChevronDown, LuChevronRight } from "react-icons/lu";
+import { LuServer, LuBox, LuCode, LuChevronDown, LuChevronRight, LuPlus } from "react-icons/lu";
 import { SectionLabel } from "./SectionLabel";
 import { StatusDot } from "./StatusDot";
 
@@ -15,6 +15,7 @@ interface SidebarServer {
 interface SidebarProject {
   id: string;
   name: string;
+  type?: string;
 }
 
 interface SidebarProps {
@@ -24,6 +25,7 @@ interface SidebarProps {
   selectedProject?: string;
   onSelectServer: (id: string) => void;
   onSelectProject: (id: string) => void;
+  onCreateProject?: () => void;
 }
 
 const frameworkIcons: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -45,6 +47,7 @@ export function Sidebar({
   selectedProject,
   onSelectServer,
   onSelectProject,
+  onCreateProject,
 }: SidebarProps) {
   const [serversOpen, setServersOpen] = useState(true);
   const [projectsOpen, setProjectsOpen] = useState(true);
@@ -93,17 +96,28 @@ export function Sidebar({
 
       {/* Projects section */}
       <div className="p-3">
-        <button
-          onClick={() => setProjectsOpen(!projectsOpen)}
-          className="flex items-center gap-1.5 w-full mb-2 cursor-pointer"
-        >
-          {projectsOpen ? (
-            <LuChevronDown className="text-text-dim text-xs" />
-          ) : (
-            <LuChevronRight className="text-text-dim text-xs" />
+        <div className="flex items-center gap-1.5 mb-2">
+          <button
+            onClick={() => setProjectsOpen(!projectsOpen)}
+            className="flex items-center gap-1.5 flex-1 cursor-pointer"
+          >
+            {projectsOpen ? (
+              <LuChevronDown className="text-text-dim text-xs" />
+            ) : (
+              <LuChevronRight className="text-text-dim text-xs" />
+            )}
+            <SectionLabel>Projects</SectionLabel>
+          </button>
+          {onCreateProject && (
+            <button
+              onClick={onCreateProject}
+              className="p-0.5 rounded text-text-dim hover:text-accent hover:bg-white/5 transition-all cursor-pointer"
+              title="Create project"
+            >
+              <LuPlus className="text-xs" />
+            </button>
           )}
-          <SectionLabel>Projects</SectionLabel>
-        </button>
+        </div>
         {projectsOpen && (
           <div className="flex flex-col gap-0.5">
             {projects.map((project) => {
@@ -119,7 +133,12 @@ export function Sidebar({
                   }`}
                 >
                   <LuCode className="text-sm shrink-0" />
-                  <span className="text-sm truncate">{project.name}</span>
+                  <span className="text-sm truncate flex-1">{project.name}</span>
+                  {project.type && (
+                    <span className="text-[9px] text-text-dim px-1 py-0.5 rounded bg-[#1a1a1a]">
+                      {project.type}
+                    </span>
+                  )}
                 </button>
               );
             })}

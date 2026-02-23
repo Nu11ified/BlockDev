@@ -125,10 +125,20 @@ export class KubeJSProvider implements FrameworkProvider {
   }
 
   async deploy(artifact: BuildResult, target: ServerInstance): Promise<void> {
-    const modsDir = join(target.path, "mods");
-    await mkdir(modsDir, { recursive: true });
     const filename = artifact.artifactPath.split("/").pop()!;
-    await copyFile(artifact.artifactPath, join(modsDir, filename));
+    const ext = filename.split(".").pop()?.toLowerCase();
+
+    if (ext === "js" || ext === "ts") {
+      // Script files go to the KubeJS server_scripts directory
+      const scriptsDir = join(target.path, "kubejs", "server_scripts");
+      await mkdir(scriptsDir, { recursive: true });
+      await copyFile(artifact.artifactPath, join(scriptsDir, filename));
+    } else {
+      // JARs (mods) go to the mods directory
+      const modsDir = join(target.path, "mods");
+      await mkdir(modsDir, { recursive: true });
+      await copyFile(artifact.artifactPath, join(modsDir, filename));
+    }
   }
 
   getReloadCommand(): string | null {

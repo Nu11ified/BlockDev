@@ -5,11 +5,12 @@ import { GlassNav, Button } from "../components";
 import { Console } from "../components/Console";
 import { DevToolsPanel } from "../components/DevToolsPanel";
 import { ResourcePanel } from "../components/ResourcePanel";
+import { ProjectsPanel } from "../components/ProjectsPanel";
 import { Sidebar } from "../components/Sidebar";
 import { ActionBar } from "../components/ActionBar";
 import { StatusBar } from "../components/StatusBar";
 import { TabBar } from "../components/TabBar";
-import { useRPC, onConsoleOutput, onServerStatus } from "../hooks/useRPC";
+import { useRPC, onConsoleOutput, onServerStatus, onAutoDeployStatus } from "../hooks/useRPC";
 
 interface WorkspaceProps {
   onBack: () => void;
@@ -17,7 +18,7 @@ interface WorkspaceProps {
 
 type ServerStatus = "running" | "stopped" | "starting" | "stopping" | "error";
 
-const TABS = ["Console", "Dev Tools", "Config", "Resources"];
+const TABS = ["Console", "Dev Tools", "Projects", "Resources"];
 
 export function Workspace({ onBack }: WorkspaceProps) {
   const rpc = useRPC();
@@ -66,6 +67,7 @@ export function Workspace({ onBack }: WorkspaceProps) {
   const projects = (manifest?.projects ?? []).map((p) => ({
     id: p.id,
     name: p.id,
+    type: p.type,
   }));
 
   const currentServer = manifest?.servers.find((s) => s.id === selectedServer);
@@ -90,6 +92,32 @@ export function Workspace({ onBack }: WorkspaceProps) {
     });
     return unsubscribe;
   }, [selectedServer]);
+
+  // Subscribe to auto-deploy status events → append to console
+  useEffect(() => {
+    const unsubscribe = onAutoDeployStatus((event) => {
+      setMessages((prev) => [
+        ...prev,
+        {
+          timestamp: Date.now(),
+          level: event.stage === "error" ? "error" as const : "info" as const,
+          source: "auto-deploy",
+          text: `[${event.stage}] ${event.message}`,
+        },
+      ]);
+    });
+    return unsubscribe;
+  }, []);
+
+  // Re-fetch workspace manifest (e.g. after creating a project)
+  const refreshManifest = async () => {
+    try {
+      const ws = await rpc.request("getCurrentWorkspace", {});
+      if (ws) setManifest(ws);
+    } catch (err) {
+      console.error("Failed to refresh manifest:", err);
+    }
+  };
 
   // Fetch initial server status on mount and when selected server changes
   useEffect(() => {
@@ -308,6 +336,7 @@ export function Workspace({ onBack }: WorkspaceProps) {
         selectedProject={selectedProject}
         onSelectServer={setSelectedServer}
         onSelectProject={(id) => setSelectedProject(id)}
+        onCreateProject={() => setActiveTab("Projects")}
       />
 
       {/* Main content area */}
@@ -336,10 +365,13 @@ export function Workspace({ onBack }: WorkspaceProps) {
           {activeTab === "Dev Tools" && selectedServer && (
             <DevToolsPanel serverId={selectedServer} serverStatus={serverStatus} />
           )}
-          {activeTab === "Config" && (
-            <div className="flex-1 flex items-center justify-center text-text-dim text-sm">
-              Configuration editor coming soon
-            </div>
+          {activeTab === "Projects" && (
+            <ProjectsPanel
+              serverFramework={currentServer?.framework}
+              mcVersion={currentServer?.mcVersion}
+              selectedServer={selectedServer ?? undefined}
+              onProjectCreated={refreshManifest}
+            />
           )}
           {activeTab === "Resources" && selectedServer && (
             <ResourcePanel serverId={selectedServer} />

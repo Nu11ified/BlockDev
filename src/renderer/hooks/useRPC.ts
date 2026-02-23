@@ -5,7 +5,7 @@
 
 import { Electroview } from "electrobun/view";
 import type { BlockDevRPC } from "../../shared/rpc-types";
-import type { ConsoleMessage, RunningProcess, ServerResourceStats } from "../../shared/types";
+import type { ConsoleMessage, RunningProcess, ServerResourceStats, AutoDeployEvent } from "../../shared/types";
 
 // --- Listener types ---
 
@@ -25,6 +25,7 @@ type BuildOutputListener = (output: {
   line: string;
 }) => void;
 type ResourceStatsListener = (stats: ServerResourceStats) => void;
+type AutoDeployStatusListener = (event: AutoDeployEvent) => void;
 
 // --- Listener registries ---
 
@@ -35,6 +36,7 @@ const listeners = {
   fileChange: new Set<FileChangeListener>(),
   buildOutput: new Set<BuildOutputListener>(),
   resourceStats: new Set<ResourceStatsListener>(),
+  autoDeployStatus: new Set<AutoDeployStatusListener>(),
 };
 
 // --- Module-level RPC singleton ---
@@ -60,6 +62,9 @@ const rpc = Electroview.defineRPC<BlockDevRPC>({
       },
       resourceStats: (stats) => {
         listeners.resourceStats.forEach((fn) => fn(stats));
+      },
+      autoDeployStatus: (event) => {
+        listeners.autoDeployStatus.forEach((fn) => fn(event));
       },
     },
   },
@@ -117,5 +122,12 @@ export function onResourceStats(listener: ResourceStatsListener): () => void {
   listeners.resourceStats.add(listener);
   return () => {
     listeners.resourceStats.delete(listener);
+  };
+}
+
+export function onAutoDeployStatus(listener: AutoDeployStatusListener): () => void {
+  listeners.autoDeployStatus.add(listener);
+  return () => {
+    listeners.autoDeployStatus.delete(listener);
   };
 }

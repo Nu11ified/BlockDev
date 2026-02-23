@@ -186,6 +186,22 @@ export class ServerController {
     await Promise.all(stopPromises);
   }
 
+  /**
+   * Synchronous force-kill of ALL managed server processes.
+   * Used as a last-resort safety net in process "exit" handlers where
+   * async work is not possible. Sends SIGKILL to every tracked PID.
+   */
+  killAll(): void {
+    for (const [id, server] of this.servers) {
+      try {
+        server.process.kill(9); // SIGKILL
+      } catch {
+        // Process may already be dead — ignore
+      }
+    }
+    this.servers.clear();
+  }
+
   private async streamOutput(
     serverId: string,
     stream: ReadableStream<Uint8Array>,

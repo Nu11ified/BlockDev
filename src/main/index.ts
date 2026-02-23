@@ -24,6 +24,7 @@ import type {
   RunningProcess,
   ServerInstance,
   BuildResult,
+  ProjectTemplate,
 } from "../shared/types";
 
 import { DownloadManager } from "./services/download-manager";
@@ -34,6 +35,7 @@ import { FileWatcher } from "./services/file-watcher";
 import { ProcessMonitor } from "./services/process-monitor";
 import { ResourceManager } from "./services/resource-manager";
 import { createPluginRegistry, loadBuiltinPlugins } from "./plugins/plugin-loader";
+import { scaffoldProject } from "./services/project-scaffolder";
 
 // ---------------------------------------------------------------------------
 // Crash logging — writes to ~/.blockdev/crash.log so errors survive app exit
@@ -681,6 +683,108 @@ const rpc = BrowserView.defineRPC<BlockDevRPC>({
           return { success: false, error: message };
         }
       },
+
+      // --- Project scaffolding & editor ---
+
+      createProject: async (params) => {
+        try {
+          if (!servicesReady) {
+            return { success: false, error: "Services are still initializing" };
+          }
+
+          const workspace = workspaceManager.getCurrent();
+          const workspacePath = workspaceManager.getCurrentPath();
+          if (!workspace || !workspacePath) {
+            return { success: false, error: "No workspace is currently open" };
+          }
+
+          const entry = await scaffoldProject(
+            workspacePath,
+            params.template,
+            params.name,
+            params.mcVersion,
+            params.packageName,
+          );
+
+          // Add project to workspace manifest
+          workspace.projects.push(entry);
+
+          // Auto-create a deployment mapping to the first server
+          if (workspace.servers.length > 0) {
+            const server = workspace.servers[0];
+            const framework = entry.framework || server.framework;
+            let targetDir = "plugins";
+            let reloadStrategy: "restart" | "reload-command" | "hot" = "restart";
+
+            if (framework === "fabric") {
+              targetDir = "mods";
+            } else if (framework === "kubejs") {
+              targetDir = "kubejs/server_scripts";
+              reloadStrategy = "hot";
+            } else if (framework === "paper") {
+              reloadStrategy = "reload-command";
+            }
+
+            workspace.deployments.push({
+              project: entry.id,
+              server: server.id,
+              targetDir,
+              reloadStrategy,
+            });
+          }
+
+          await workspaceManager.saveCurrent();
+
+          return { success: true, projectId: entry.id };
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : String(err);
+          return { success: false, error: message };
+        }
+      },
+
+      openInEditor: async (params) => {
+        try {
+          const { projectPath, editor } = params;
+          const os = platform();
+
+          let cmd: string[];
+          switch (editor) {
+            case "vscode":
+              cmd = ["code", projectPath];
+              break;
+            case "cursor":
+              cmd = ["cursor", projectPath];
+              break;
+            case "zed":
+              cmd = ["zed", projectPath];
+              break;
+            case "intellij":
+              if (os === "darwin") {
+                cmd = ["open", "-a", "IntelliJ IDEA", projectPath];
+              } else {
+                cmd = ["idea", projectPath];
+              }
+              break;
+            default:
+              return { success: false, error: `Unknown editor: ${editor}` };
+          }
+
+          Bun.spawn(cmd, { stdout: "ignore", stderr: "ignore" });
+          return { success: true };
+        } catch {
+          return { success: false, error: "Failed to open editor" };
+        }
+      },
+
+      getProjects: async () => {
+        try {
+          if (!servicesReady) return [];
+          const workspace = workspaceManager.getCurrent();
+          return workspace?.projects ?? [];
+        } catch {
+          return [];
+        }
+      },
     },
 
     // ------------------------------------------------------------------
@@ -695,7 +799,6 @@ const rpc = BrowserView.defineRPC<BlockDevRPC>({
         if (enabled) {
           autoDeployState.set(serverId, true);
 
-          // Set up file watching for auto-deploy
           const workspace = workspaceManager.getCurrent();
           const workspacePath = workspaceManager.getCurrentPath();
           if (!workspace || !workspacePath) return;
@@ -706,11 +809,34 @@ const rpc = BrowserView.defineRPC<BlockDevRPC>({
           const provider = registry.get(serverConfig.framework);
           if (!provider) return;
 
-          const patterns = provider.getWatchPatterns();
+          // Collect watch patterns from both framework and project sources
+          const patterns = [
+            ...provider.getWatchPatterns(),
+            "projects/**/*.java",
+            "projects/**/*.js",
+            "projects/**/*.ts",
+            "projects/**/*.kt",
+          ];
+
+          // Debounce timer to avoid rapid-fire rebuilds
+          let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
           fileWatcher
-            .watch(`autodeploy-${serverId}`, workspacePath, patterns, (event, path) => {
-              rpc.send("fileChanged", { path, event });
+            .watch(`autodeploy-${serverId}`, workspacePath, patterns, (event, filePath) => {
+              // Notify the renderer of the file change
+              rpc.send("fileChanged", { path: filePath, event });
+
+              if (event === "unlink") return;
+              if (!autoDeployState.get(serverId)) return;
+
+              // Debounce: wait 200ms after the last change before starting the pipeline
+              if (debounceTimer) clearTimeout(debounceTimer);
+              debounceTimer = setTimeout(() => {
+                runAutoDeployPipeline(serverId, serverConfig.framework, workspacePath, workspace)
+                  .catch((err) => {
+                    console.error(`Auto-deploy pipeline error for ${serverId}:`, err);
+                  });
+              }, 200);
             })
             .catch((err) => {
               console.error(`Failed to set up file watcher for ${serverId}:`, err);
@@ -795,6 +921,155 @@ function onStatus(serverId: string, status: RunningProcess["status"]): void {
 }
 
 // ---------------------------------------------------------------------------
+// Auto-deploy pipeline: build → deploy → reload for watched projects
+// ---------------------------------------------------------------------------
+
+async function runAutoDeployPipeline(
+  serverId: string,
+  framework: string,
+  workspacePath: string,
+  workspace: import("../shared/types").WorkspaceManifest,
+): Promise<void> {
+  const provider = registry.get(framework);
+  if (!provider) return;
+
+  // Find deployments linked to this server
+  const deployments = workspace.deployments.filter((d) => d.server === serverId);
+  if (deployments.length === 0) return;
+
+  for (const deployment of deployments) {
+    const project = workspace.projects.find((p) => p.id === deployment.project);
+    if (!project) continue;
+
+    const projectDir = join(workspacePath, project.path);
+    const sendStatus = (stage: import("../shared/types").AutoDeployEvent["stage"], message: string) => {
+      try {
+        rpc.send("autoDeployStatus", {
+          projectId: project.id,
+          serverId,
+          stage,
+          message,
+        });
+        // Also log to console
+        rpc.send("consoleOutput", {
+          timestamp: Date.now(),
+          level: stage === "error" ? "error" : "info",
+          source: "auto-deploy",
+          text: `[${project.id}] ${message}`,
+        });
+      } catch {
+        // Window may be closed
+      }
+    };
+
+    sendStatus("watching", "File change detected, starting pipeline...");
+
+    if (project.type === "script") {
+      // --- KubeJS script project: copy files directly ---
+      sendStatus("deploying", "Copying scripts to server...");
+      try {
+        const serverDir = join(workspacePath, "servers", serverId);
+        const scriptsSourceDir = join(projectDir, "server_scripts");
+        const scriptsTargetDir = join(serverDir, "kubejs", "server_scripts");
+
+        // Copy all .js files from the project to the server
+        const { readdir, copyFile: cpFile, mkdir: mkDir } = await import("node:fs/promises");
+        await mkDir(scriptsTargetDir, { recursive: true });
+        const files = await readdir(scriptsSourceDir).catch(() => [] as string[]);
+        for (const file of files) {
+          if (file.endsWith(".js") || file.endsWith(".ts")) {
+            await cpFile(join(scriptsSourceDir, file), join(scriptsTargetDir, file));
+          }
+        }
+
+        // If server is running, send reload command
+        const status = serverController.getStatus(serverId);
+        if (status && (status.status === "running")) {
+          sendStatus("reloading", "Reloading KubeJS scripts...");
+          await serverController.sendCommand(serverId, "/kubejs reload server_scripts");
+        }
+
+        sendStatus("done", "Scripts deployed successfully");
+      } catch (err) {
+        sendStatus("error", `Deploy failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    } else if (project.type === "gradle") {
+      // --- Gradle project (Paper/Fabric): build then deploy ---
+      sendStatus("building", `Running ${project.buildCommand}...`);
+      try {
+        const proc = Bun.spawn(project.buildCommand.split(" "), {
+          cwd: projectDir,
+          stdout: "pipe",
+          stderr: "pipe",
+        });
+
+        // Stream build output to console
+        const reader = proc.stdout?.getReader();
+        const decoder = new TextDecoder();
+        if (reader) {
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              const text = decoder.decode(value, { stream: true });
+              for (const line of text.split("\n")) {
+                if (line.trim()) {
+                  rpc.send("consoleOutput", {
+                    timestamp: Date.now(),
+                    level: "debug",
+                    source: "auto-deploy",
+                    text: `[build] ${line}`,
+                  });
+                }
+              }
+            }
+          } catch {
+            // stream ended
+          } finally {
+            reader.releaseLock();
+          }
+        }
+
+        const exitCode = await proc.exited;
+        if (exitCode !== 0) {
+          sendStatus("error", "Build failed (see console output above)");
+          continue;
+        }
+
+        // Deploy artifact
+        sendStatus("deploying", "Copying artifact to server...");
+        const artifactPath = join(projectDir, project.artifactPath);
+        const instance = resolveServer(serverId);
+        const buildResult: BuildResult = {
+          success: true,
+          artifactPath,
+          duration: 0,
+          output: "",
+        };
+        await provider.deploy(buildResult, instance);
+
+        // Reload or restart
+        const status = serverController.getStatus(serverId);
+        if (status && (status.status === "running")) {
+          const reloadCmd = provider.getReloadCommand();
+          if (reloadCmd) {
+            sendStatus("reloading", `Sending reload command: ${reloadCmd}`);
+            await serverController.sendCommand(serverId, reloadCmd);
+          } else {
+            sendStatus("reloading", "No hot reload available — restarting server...");
+            await serverController.restart(serverId, onConsole, onStatus, onLineHook);
+          }
+        }
+
+        sendStatus("done", "Build & deploy successful");
+      } catch (err) {
+        sendStatus("error", `Pipeline failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Create the BrowserWindow — show the GUI immediately
 // ---------------------------------------------------------------------------
 
@@ -816,9 +1091,10 @@ try {
   crashLog("Window created successfully");
   console.log("BlockDev window created");
 
-  // Log when the window closes so we can see if/why it happens
+  // When the window closes, stop all servers before the process exits
   win.on("close", () => {
-    crashLog("Window close event fired");
+    crashLog("Window close event fired — stopping servers");
+    shutdownGracefully();
   });
 } catch (err) {
   crashLog("Failed to create window", err);
@@ -856,27 +1132,50 @@ try {
 // Shutdown handling: stop all servers and file watchers on process exit
 // ---------------------------------------------------------------------------
 
-function cleanup(): void {
-  if (!servicesReady) return;
+let shuttingDown = false;
+
+/**
+ * Graceful shutdown: sends stop commands to all servers and waits for them
+ * to exit (up to 15s each per the ServerController timeout). Only runs once.
+ */
+async function shutdownGracefully(): Promise<void> {
+  if (shuttingDown || !servicesReady) return;
+  shuttingDown = true;
+
+  crashLog("Graceful shutdown started");
+
   fileWatcher.unwatchAll();
   processMonitor.stopAll();
-  serverController.stopAll().catch((err) => {
+
+  try {
+    await serverController.stopAll();
+    crashLog("All servers stopped gracefully");
+  } catch (err) {
+    crashLog("Error during graceful server shutdown", err);
     console.error("Error stopping servers during shutdown:", err);
-  });
+    // Force-kill anything left
+    serverController.killAll();
+  }
+
+  process.exit(0);
 }
 
+// SIGINT (Ctrl+C) and SIGTERM — attempt graceful shutdown
 process.on("SIGINT", () => {
-  cleanup();
-  process.exit(0);
+  shutdownGracefully();
 });
 
 process.on("SIGTERM", () => {
-  cleanup();
-  process.exit(0);
+  shutdownGracefully();
 });
 
-process.on("beforeExit", () => {
-  cleanup();
+// Last-resort safety net: synchronously SIGKILL any remaining child processes.
+// The "exit" event fires right before the process actually dies — async work
+// is not possible here, but we can at least make sure child PIDs don't linger.
+process.on("exit", () => {
+  if (servicesReady) {
+    serverController.killAll();
+  }
 });
 
 crashLog("Main process fully initialized");

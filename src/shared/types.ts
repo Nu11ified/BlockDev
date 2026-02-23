@@ -41,6 +41,16 @@ export interface RunningProcess {
 
 export type ReloadCapability = "hot" | "warm" | "cold";
 
+// === Project Template & Auto-Deploy Types ===
+export type ProjectTemplate = "paper-plugin" | "fabric-mod" | "kubejs-scripts";
+
+export interface AutoDeployEvent {
+  projectId: string;
+  serverId: string;
+  stage: "watching" | "building" | "deploying" | "reloading" | "done" | "error";
+  message: string;
+}
+
 export interface ReloadResult {
   success: boolean;
   method: "command" | "restart";
@@ -88,6 +98,7 @@ export interface ProjectEntry {
   type: "gradle" | "maven" | "script";
   buildCommand: string;
   artifactPath: string;
+  framework?: string;  // "paper" | "fabric" | "kubejs"
 }
 
 export interface DeploymentMapping {
