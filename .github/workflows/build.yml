@@ -2,7 +2,7 @@
 #
 # On push to main: builds all platforms, then auto-bumps the patch version,
 # tags the commit, and creates a GitHub Release with artifacts attached.
-# On PRs: builds only (no release).
+# On PRs from same repo: builds only (no release). Fork PRs are skipped.
 
 name: Build
 
@@ -23,6 +23,9 @@ permissions:
 
 jobs:
   build:
+    # Skip builds from forked PRs to save build minutes — fork contributions
+    # get built after merge. Same-repo PRs still build normally.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     strategy:
       fail-fast: false
       matrix:
