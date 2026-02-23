@@ -4,7 +4,8 @@
 
 import { BrowserWindow } from "electrobun/bun";
 import { join } from "node:path";
-import { platform } from "node:os";
+import { platform, homedir } from "node:os";
+import { mkdirSync, appendFileSync } from "node:fs";
 
 import type { BlockDevRPC } from "../shared/rpc-types";
 import type {
@@ -20,6 +21,37 @@ import { ServerController } from "./services/server-controller";
 import { WorkspaceManager } from "./services/workspace-manager";
 import { FileWatcher } from "./services/file-watcher";
 import { createPluginRegistry, loadBuiltinPlugins } from "./plugins/plugin-loader";
+
+// ---------------------------------------------------------------------------
+// Crash logging — writes to ~/.blockdev/crash.log so errors survive app exit
+// ---------------------------------------------------------------------------
+
+const BLOCKDEV_DIR = join(homedir(), ".blockdev");
+const CRASH_LOG = join(BLOCKDEV_DIR, "crash.log");
+
+function crashLog(label: string, err?: unknown): void {
+  try {
+    mkdirSync(BLOCKDEV_DIR, { recursive: true });
+    const timestamp = new Date().toISOString();
+    const detail = err instanceof Error ? `${err.message}\n${err.stack}` : String(err ?? "");
+    appendFileSync(CRASH_LOG, `[${timestamp}] ${label}${detail ? ": " + detail : ""}\n`);
+  } catch {
+    // If we can't write the log, there's nothing we can do.
+  }
+}
+
+// Catch any unhandled errors that escape try-catch blocks
+process.on("uncaughtException", (err) => {
+  crashLog("UNCAUGHT EXCEPTION", err);
+  console.error("BlockDev uncaught exception:", err);
+});
+
+process.on("unhandledRejection", (reason) => {
+  crashLog("UNHANDLED REJECTION", reason);
+  console.error("BlockDev unhandled rejection:", reason);
+});
+
+crashLog("Process started");
 
 // ---------------------------------------------------------------------------
 // Service declarations (initialized below, after window creation)
@@ -533,8 +565,15 @@ try {
     },
   });
 
+  crashLog("Window created successfully");
   console.log("BlockDev window created");
+
+  // Log when the window closes so we can see if/why it happens
+  win.on("close", () => {
+    crashLog("Window close event fired");
+  });
 } catch (err) {
+  crashLog("Failed to create window", err);
   console.error("Failed to create BlockDev window:", err);
   process.exit(1);
 }
@@ -551,14 +590,16 @@ try {
   fileWatcher = new FileWatcher();
   registry = createPluginRegistry();
 
+  crashLog("Loading plugins...");
   await loadBuiltinPlugins(registry, { cachePath: downloadManager.getCacheDir() });
 
   servicesReady = true;
+  crashLog("Services initialized successfully");
   console.log("BlockDev services initialized");
 } catch (err) {
+  crashLog("Failed to initialize services", err);
   console.error("Failed to initialize BlockDev services:", err);
   // Window is still visible — user can see the app but functionality will be limited.
-  // This is better than showing nothing at all.
 }
 
 // ---------------------------------------------------------------------------
@@ -587,4 +628,5 @@ process.on("beforeExit", () => {
   cleanup();
 });
 
+crashLog("Main process fully initialized");
 console.log("BlockDev main process initialized");
