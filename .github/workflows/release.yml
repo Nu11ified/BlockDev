@@ -90,7 +90,17 @@ jobs:
           $archive = Join-Path $jreDir "temurin-21.zip"
 
           Write-Host "Downloading Temurin JRE 21 for Windows/x64..."
-          Invoke-WebRequest -Uri $url -OutFile $archive
+          $retries = 3
+          for ($i = 1; $i -le $retries; $i++) {
+            try {
+              Invoke-WebRequest -Uri $url -OutFile $archive
+              break
+            } catch {
+              Write-Host "Attempt $i failed: $_"
+              if ($i -eq $retries) { throw }
+              Start-Sleep -Seconds 5
+            }
+          }
 
           Write-Host "Extracting..."
           Expand-Archive -Path $archive -DestinationPath $jreDir -Force

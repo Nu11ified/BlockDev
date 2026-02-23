@@ -23,7 +23,7 @@ URL="https://api.adoptium.net/v3/binary/latest/21/ga/${ADOPTIUM_OS}/${ADOPTIUM_A
 ARCHIVE="$JRE_DIR/temurin-21.tar.gz"
 
 echo "Downloading Temurin JRE 21 for ${ADOPTIUM_OS}/${ADOPTIUM_ARCH}..."
-curl -L -o "$ARCHIVE" "$URL"
+curl -fL --retry 3 --retry-delay 5 -o "$ARCHIVE" "$URL"
 
 echo "Extracting..."
 cd "$JRE_DIR"
