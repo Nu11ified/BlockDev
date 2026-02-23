@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Home } from "./pages/Home";
 import { CreateWorkspace } from "./pages/CreateWorkspace";
+import { Workspace } from "./pages/Workspace";
 
 type Page = "home" | "workspace" | "create";
 
@@ -28,9 +29,7 @@ export function App() {
         />
       )}
       {page === "workspace" && (
-        <div className="p-8">
-          <p className="text-text-muted">Workspace View (coming soon)</p>
-        </div>
+        <Workspace onBack={() => setPage("home")} />
       )}
     </div>
   );

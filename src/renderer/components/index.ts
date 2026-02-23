@@ -3,3 +3,8 @@ export { Card } from "./Card";
 export { SectionLabel } from "./SectionLabel";
 export { GlassNav } from "./GlassNav";
 export { StatusDot } from "./StatusDot";
+export { Console } from "./Console";
+export { Sidebar } from "./Sidebar";
+export { ActionBar } from "./ActionBar";
+export { StatusBar } from "./StatusBar";
+export { TabBar } from "./TabBar";
