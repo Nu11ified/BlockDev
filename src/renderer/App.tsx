@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { Home } from "./pages/Home";
+import { CreateWorkspace } from "./pages/CreateWorkspace";
 
 type Page = "home" | "workspace" | "create";
 
@@ -18,9 +19,13 @@ export function App() {
         />
       )}
       {page === "create" && (
-        <div className="p-8">
-          <p className="text-text-muted">Create Workspace Wizard (coming soon)</p>
-        </div>
+        <CreateWorkspace
+          onBack={() => setPage("home")}
+          onCreate={(config) => {
+            console.log("Create workspace:", config);
+            setPage("workspace");
+          }}
+        />
       )}
       {page === "workspace" && (
         <div className="p-8">
