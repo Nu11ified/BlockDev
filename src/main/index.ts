@@ -154,10 +154,8 @@ const rpc = BrowserView.defineRPC<BlockDevRPC>({
           // Ensure the server directory exists before downloading into it
           await fsp.mkdir(serverDir, { recursive: true });
 
-          // Download and set up the server jar
-          const jarPath = await provider.downloadServer(mcVersion, build, serverDir);
-          serverConfig.path = jarPath;
-
+          // Download the server jar into serverDir, then set up server files
+          await provider.downloadServer(mcVersion, build, serverDir);
           await provider.setupServer(serverConfig);
           await workspaceManager.createWorkspace(name, path, serverConfig);
 
