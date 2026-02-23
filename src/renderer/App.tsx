@@ -5,8 +5,17 @@ import { Workspace } from "./pages/Workspace";
 
 type Page = "home" | "workspace" | "create";
 
+interface WorkspaceConfig {
+  name: string;
+  path: string;
+  framework: string;
+  mcVersion: string;
+  build: string;
+}
+
 export function App() {
   const [page, setPage] = useState<Page>("home");
+  const [workspaceConfig, setWorkspaceConfig] = useState<WorkspaceConfig | null>(null);
 
   return (
     <div className="min-h-screen bg-bg text-text-primary font-satoshi">
@@ -14,16 +23,18 @@ export function App() {
         <Home
           onCreateWorkspace={() => setPage("create")}
           onOpenWorkspace={(path) => {
-            if (path) setPage("workspace");
+            if (path) {
+              setWorkspaceConfig({ name: "", path, framework: "", mcVersion: "", build: "" });
+              setPage("workspace");
+            }
           }}
-          recentWorkspaces={[]}
         />
       )}
       {page === "create" && (
         <CreateWorkspace
           onBack={() => setPage("home")}
           onCreate={(config) => {
-            console.log("Create workspace:", config);
+            setWorkspaceConfig(config);
             setPage("workspace");
           }}
         />

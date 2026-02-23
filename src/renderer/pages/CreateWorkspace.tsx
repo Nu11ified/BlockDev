@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   LuArrowLeft,
   LuServer,
@@ -6,8 +6,11 @@ import {
   LuCode2,
   LuCheck,
   LuFolderOpen,
+  LuLoader,
 } from "react-icons/lu";
 import { Button, Card, SectionLabel } from "../components";
+import { useRPC } from "../hooks/useRPC";
+import type { MinecraftVersion } from "../../shared/types";
 
 interface CreateWorkspaceProps {
   onBack: () => void;
@@ -20,83 +23,137 @@ interface CreateWorkspaceProps {
   }) => void;
 }
 
-type Framework = "paper" | "fabric" | "kubejs";
-
 interface FrameworkOption {
-  id: Framework;
+  id: string;
   name: string;
   description: string;
-  icon: React.ComponentType<{ className?: string }>;
+  icon: string;
 }
 
-const frameworks: FrameworkOption[] = [
-  {
-    id: "paper",
-    name: "Paper",
-    description: "Plugin development with the Paper API",
-    icon: LuServer,
-  },
-  {
-    id: "fabric",
-    name: "Fabric",
-    description: "Lightweight mod loader for modern mods",
-    icon: LuBox,
-  },
-  {
-    id: "kubejs",
-    name: "KubeJS",
-    description: "Script-based modding with hot reload",
-    icon: LuCode2,
-  },
-];
-
-const mcVersions = [
-  "1.21.6",
-  "1.21.5",
-  "1.21.4",
-  "1.21.3",
-  "1.21.2",
-  "1.21.1",
-  "1.21",
-  "1.20.6",
-  "1.20.4",
-];
+const frameworkIconMap: Record<string, React.ComponentType<{ className?: string }>> = {
+  paper: LuServer,
+  fabric: LuBox,
+  kubejs: LuCode2,
+};
 
 const stepNames = ["Framework", "Version", "Details"];
 
 export function CreateWorkspace({ onBack, onCreate }: CreateWorkspaceProps) {
+  const rpc = useRPC();
+
   const [step, setStep] = useState(0);
-  const [selectedFramework, setSelectedFramework] = useState<Framework | null>(
-    null
-  );
+  const [selectedFramework, setSelectedFramework] = useState<string | null>(null);
   const [selectedVersion, setSelectedVersion] = useState<string | null>(null);
   const [workspaceName, setWorkspaceName] = useState("");
   const [workspacePath, setWorkspacePath] = useState("~/blockdev-workspaces");
   const [build, setBuild] = useState("latest");
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+
+  // Framework loading state
+  const [frameworks, setFrameworks] = useState<FrameworkOption[]>([]);
+  const [frameworksLoading, setFrameworksLoading] = useState(true);
+
+  // Version loading state
+  const [versions, setVersions] = useState<MinecraftVersion[]>([]);
+  const [versionsLoading, setVersionsLoading] = useState(false);
+
+  // Fetch frameworks on mount
+  useEffect(() => {
+    let cancelled = false;
+
+    async function fetchFrameworks() {
+      try {
+        const result = await rpc.request("getFrameworks", {});
+        if (!cancelled) {
+          setFrameworks(result);
+        }
+      } catch (err) {
+        console.error("Failed to fetch frameworks:", err);
+      } finally {
+        if (!cancelled) {
+          setFrameworksLoading(false);
+        }
+      }
+    }
+
+    fetchFrameworks();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Fetch versions when entering Step 2
+  useEffect(() => {
+    if (step !== 1 || !selectedFramework) return;
+    let cancelled = false;
+
+    async function fetchVersions() {
+      setVersionsLoading(true);
+      try {
+        const result = await rpc.request("getVersions", {
+          framework: selectedFramework!,
+        });
+        if (!cancelled) {
+          setVersions(result);
+        }
+      } catch (err) {
+        console.error("Failed to fetch versions:", err);
+      } finally {
+        if (!cancelled) {
+          setVersionsLoading(false);
+        }
+      }
+    }
+
+    fetchVersions();
+    return () => {
+      cancelled = true;
+    };
+  }, [step, selectedFramework]);
 
   const canNext =
     (step === 0 && selectedFramework !== null) ||
     (step === 1 && selectedVersion !== null) ||
-    step === 2;
+    (step === 2 && !creating);
 
-  function handleFrameworkSelect(fw: Framework) {
+  function handleFrameworkSelect(fw: string) {
     setSelectedFramework(fw);
     if (!workspaceName || workspaceName === `${selectedFramework}-dev`) {
       setWorkspaceName(`${fw}-dev`);
     }
   }
 
-  function handleNext() {
+  async function handleNext() {
     if (step < 2) {
       setStep(step + 1);
     } else {
-      onCreate({
+      // Final step: create the workspace via RPC
+      setCreating(true);
+      setCreateError(null);
+
+      const config = {
         name: workspaceName || `${selectedFramework}-dev`,
         path: workspacePath,
         framework: selectedFramework!,
         mcVersion: selectedVersion!,
         build,
-      });
+      };
+
+      try {
+        const result = await rpc.request("createWorkspace", config);
+        if (result.success) {
+          onCreate(config);
+        } else {
+          setCreateError(result.error || "Failed to create workspace");
+        }
+      } catch (err) {
+        setCreateError(
+          err instanceof Error ? err.message : "An unexpected error occurred"
+        );
+      } finally {
+        setCreating(false);
+      }
     }
   }
 
@@ -105,6 +162,17 @@ export function CreateWorkspace({ onBack, onCreate }: CreateWorkspaceProps) {
       setStep(step - 1);
     } else {
       onBack();
+    }
+  }
+
+  async function handleSelectDirectory() {
+    try {
+      const result = await rpc.request("selectDirectory", {});
+      if (result.path) {
+        setWorkspacePath(result.path);
+      }
+    } catch (err) {
+      console.error("Failed to open directory picker:", err);
     }
   }
 
@@ -169,47 +237,54 @@ export function CreateWorkspace({ onBack, onCreate }: CreateWorkspaceProps) {
           {step === 0 && (
             <>
               <SectionLabel>Select Framework</SectionLabel>
-              <div className="grid grid-cols-3 gap-4 mt-4">
-                {frameworks.map((fw) => {
-                  const isSelected = selectedFramework === fw.id;
-                  const Icon = fw.icon;
-                  return (
-                    <Card
-                      key={fw.id}
-                      hoverable
-                      onClick={() => handleFrameworkSelect(fw.id)}
-                      className={`${
-                        isSelected
-                          ? "!border-accent border-2"
-                          : "border border-transparent"
-                      }`}
-                    >
-                      <div className="flex flex-col items-center text-center gap-3">
-                        <div
-                          className={`w-12 h-12 rounded-xl flex items-center justify-center transition-colors duration-300 ${
-                            isSelected
-                              ? "bg-accent/10 text-accent"
-                              : "bg-[#1a1a1a] text-text-muted"
-                          }`}
-                        >
-                          <Icon className="text-2xl" />
-                        </div>
-                        <div>
-                          <p className="text-sm font-semibold">{fw.name}</p>
-                          <p className="text-xs text-text-muted mt-1 leading-relaxed">
-                            {fw.description}
-                          </p>
-                        </div>
-                        {isSelected && (
-                          <div className="w-5 h-5 rounded-full bg-accent flex items-center justify-center">
-                            <LuCheck className="text-black text-xs" />
+              {frameworksLoading ? (
+                <div className="flex items-center gap-2 mt-6 text-text-dim text-sm">
+                  <LuLoader className="animate-spin" />
+                  <span>Loading frameworks...</span>
+                </div>
+              ) : (
+                <div className="grid grid-cols-3 gap-4 mt-4">
+                  {frameworks.map((fw) => {
+                    const isSelected = selectedFramework === fw.id;
+                    const Icon = frameworkIconMap[fw.id] || LuServer;
+                    return (
+                      <Card
+                        key={fw.id}
+                        hoverable
+                        onClick={() => handleFrameworkSelect(fw.id)}
+                        className={`${
+                          isSelected
+                            ? "!border-accent border-2"
+                            : "border border-transparent"
+                        }`}
+                      >
+                        <div className="flex flex-col items-center text-center gap-3">
+                          <div
+                            className={`w-12 h-12 rounded-xl flex items-center justify-center transition-colors duration-300 ${
+                              isSelected
+                                ? "bg-accent/10 text-accent"
+                                : "bg-[#1a1a1a] text-text-muted"
+                            }`}
+                          >
+                            <Icon className="text-2xl" />
                           </div>
-                        )}
-                      </div>
-                    </Card>
-                  );
-                })}
-              </div>
+                          <div>
+                            <p className="text-sm font-semibold">{fw.name}</p>
+                            <p className="text-xs text-text-muted mt-1 leading-relaxed">
+                              {fw.description}
+                            </p>
+                          </div>
+                          {isSelected && (
+                            <div className="w-5 h-5 rounded-full bg-accent flex items-center justify-center">
+                              <LuCheck className="text-black text-xs" />
+                            </div>
+                          )}
+                        </div>
+                      </Card>
+                    );
+                  })}
+                </div>
+              )}
             </>
           )}
         </div>
@@ -225,51 +300,65 @@ export function CreateWorkspace({ onBack, onCreate }: CreateWorkspaceProps) {
           {step === 1 && (
             <>
               <SectionLabel>Minecraft Version</SectionLabel>
-              <div className="flex flex-col gap-1 mt-4">
-                {mcVersions.map((version, i) => {
-                  const isSelected = selectedVersion === version;
-                  return (
-                    <button
-                      key={version}
-                      onClick={() => setSelectedVersion(version)}
-                      className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-300 cursor-pointer ${
-                        isSelected
-                          ? "bg-card-hover text-text-primary"
-                          : "text-text-muted hover:bg-card hover:text-text-primary"
-                      }`}
-                    >
-                      {/* Radio indicator */}
-                      <div
-                        className={`w-4 h-4 rounded-full border-2 flex items-center justify-center transition-all duration-300 ${
+              {versionsLoading ? (
+                <div className="flex items-center gap-2 mt-6 text-text-dim text-sm">
+                  <LuLoader className="animate-spin" />
+                  <span>Loading versions...</span>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-1 mt-4">
+                  {versions.map((version, i) => {
+                    const isSelected = selectedVersion === version.id;
+                    return (
+                      <button
+                        key={version.id}
+                        onClick={() => setSelectedVersion(version.id)}
+                        className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-300 cursor-pointer ${
                           isSelected
-                            ? "border-accent"
-                            : "border-border-prominent"
+                            ? "bg-card-hover text-text-primary"
+                            : "text-text-muted hover:bg-card hover:text-text-primary"
                         }`}
                       >
+                        {/* Radio indicator */}
                         <div
-                          className={`w-2 h-2 rounded-full transition-all duration-300 ${
+                          className={`w-4 h-4 rounded-full border-2 flex items-center justify-center transition-all duration-300 ${
                             isSelected
-                              ? "bg-accent scale-100"
-                              : "bg-transparent scale-0"
+                              ? "border-accent"
+                              : "border-border-prominent"
                           }`}
-                        />
-                      </div>
+                        >
+                          <div
+                            className={`w-2 h-2 rounded-full transition-all duration-300 ${
+                              isSelected
+                                ? "bg-accent scale-100"
+                                : "bg-transparent scale-0"
+                            }`}
+                          />
+                        </div>
 
-                      {/* Version text */}
-                      <span className="text-sm font-medium font-mono">
-                        {version}
-                      </span>
-
-                      {/* Latest badge */}
-                      {i === 0 && (
-                        <span className="text-[10px] font-bold tracking-wide uppercase bg-accent/15 text-accent px-2 py-0.5 rounded-full">
-                          latest
+                        {/* Version text */}
+                        <span className="text-sm font-medium font-mono">
+                          {version.id}
                         </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
+
+                        {/* Latest badge */}
+                        {i === 0 && (
+                          <span className="text-[10px] font-bold tracking-wide uppercase bg-accent/15 text-accent px-2 py-0.5 rounded-full">
+                            latest
+                          </span>
+                        )}
+
+                        {/* Snapshot badge */}
+                        {version.type === "snapshot" && (
+                          <span className="text-[10px] font-bold tracking-wide uppercase bg-yellow-500/15 text-yellow-400 px-2 py-0.5 rounded-full">
+                            snapshot
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </>
           )}
         </div>
@@ -308,9 +397,7 @@ export function CreateWorkspace({ onBack, onCreate }: CreateWorkspaceProps) {
                   />
                   <button
                     className="px-4 py-3 rounded-xl bg-card border border-border-subtle text-text-muted hover:text-text-primary hover:border-border-prominent transition-all duration-300 cursor-pointer"
-                    onClick={() => {
-                      /* Directory picker will be wired via RPC later */
-                    }}
+                    onClick={handleSelectDirectory}
                   >
                     <LuFolderOpen className="text-lg" />
                   </button>
@@ -343,6 +430,13 @@ export function CreateWorkspace({ onBack, onCreate }: CreateWorkspaceProps) {
                   </button>
                 </div>
               </div>
+
+              {/* Error message */}
+              {createError && (
+                <div className="px-4 py-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
+                  {createError}
+                </div>
+              )}
 
               {/* Summary */}
               <Card hoverable={false} className="mt-2">
@@ -398,9 +492,9 @@ export function CreateWorkspace({ onBack, onCreate }: CreateWorkspaceProps) {
           variant="primary"
           onClick={handleNext}
           disabled={!canNext}
-          icon={step === 2 ? LuCheck : undefined}
+          icon={creating ? LuLoader : step === 2 ? LuCheck : undefined}
         >
-          {step === 2 ? "Create Workspace" : "Next"}
+          {creating ? "Creating..." : step === 2 ? "Create Workspace" : "Next"}
         </Button>
       </div>
     </div>

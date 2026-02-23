@@ -1,19 +1,12 @@
-import React from "react";
-import { LuPlus, LuFolderOpen, LuServer, LuBox, LuCode2 } from "react-icons/lu";
+import React, { useState, useEffect } from "react";
+import { LuPlus, LuFolderOpen, LuServer, LuBox, LuCode2, LuLoader } from "react-icons/lu";
 import { Button, Card, SectionLabel } from "../components";
-
-interface RecentWorkspace {
-  name: string;
-  path: string;
-  framework: string;
-  mcVersion: string;
-  lastOpened: string;
-}
+import { useRPC } from "../hooks/useRPC";
+import type { RecentWorkspace } from "../../shared/types";
 
 interface HomeProps {
   onCreateWorkspace: () => void;
   onOpenWorkspace: (path: string) => void;
-  recentWorkspaces: RecentWorkspace[];
 }
 
 const frameworkIcons: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -22,11 +15,57 @@ const frameworkIcons: Record<string, React.ComponentType<{ className?: string }>
   kubejs: LuCode2,
 };
 
-export function Home({
-  onCreateWorkspace,
-  onOpenWorkspace,
-  recentWorkspaces,
-}: HomeProps) {
+function formatRelativeTime(timestamp: number): string {
+  const now = Date.now();
+  const diff = now - timestamp;
+  const seconds = Math.floor(diff / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
+
+  if (seconds < 60) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  if (hours < 24) return `${hours}h ago`;
+  if (days === 1) return "yesterday";
+  if (days < 7) return `${days}d ago`;
+
+  const date = new Date(timestamp);
+  return date.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: date.getFullYear() !== new Date().getFullYear() ? "numeric" : undefined,
+  });
+}
+
+export function Home({ onCreateWorkspace, onOpenWorkspace }: HomeProps) {
+  const rpc = useRPC();
+  const [recentWorkspaces, setRecentWorkspaces] = useState<RecentWorkspace[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function fetchRecent() {
+      try {
+        const workspaces = await rpc.request("getRecentWorkspaces", {});
+        if (!cancelled) {
+          setRecentWorkspaces(workspaces);
+        }
+      } catch (err) {
+        console.error("Failed to fetch recent workspaces:", err);
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    fetchRecent();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   return (
     <div className="flex flex-col items-center justify-center min-h-screen gap-10 p-8">
       <div className="flex flex-col items-center gap-4">
@@ -54,7 +93,14 @@ export function Home({
         </Button>
       </div>
 
-      {recentWorkspaces.length > 0 && (
+      {loading && (
+        <div className="flex items-center gap-2 text-text-dim text-sm">
+          <LuLoader className="animate-spin" />
+          <span>Loading workspaces...</span>
+        </div>
+      )}
+
+      {!loading && recentWorkspaces.length > 0 && (
         <div className="w-full max-w-md flex flex-col gap-3">
           <SectionLabel>Recent Workspaces</SectionLabel>
           {recentWorkspaces.map((ws) => {
@@ -74,7 +120,7 @@ export function Home({
                     </p>
                   </div>
                   <span className="text-xs text-text-dim shrink-0">
-                    {ws.lastOpened}
+                    {formatRelativeTime(ws.lastOpened)}
                   </span>
                 </div>
               </Card>

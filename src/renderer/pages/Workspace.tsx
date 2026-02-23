@@ -1,12 +1,13 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { LuArrowLeft } from "react-icons/lu";
-import type { ConsoleMessage } from "../../shared/types";
+import type { ConsoleMessage, RunningProcess } from "../../shared/types";
 import { GlassNav, Button } from "../components";
 import { Console } from "../components/Console";
 import { Sidebar } from "../components/Sidebar";
 import { ActionBar } from "../components/ActionBar";
 import { StatusBar } from "../components/StatusBar";
 import { TabBar } from "../components/TabBar";
+import { useRPC, onConsoleOutput, onServerStatus } from "../hooks/useRPC";
 
 interface WorkspaceProps {
   onBack: () => void;
@@ -16,61 +17,18 @@ type ServerStatus = "running" | "stopped" | "starting" | "stopping" | "error";
 
 const TABS = ["Console", "Actions", "Config", "World"];
 
-const sampleMessages: ConsoleMessage[] = [
-  {
-    timestamp: Date.now() - 30000,
-    level: "info",
-    source: "server",
-    text: "[Server] Loading Paper version 1.20.4-R0.1-SNAPSHOT",
-  },
-  {
-    timestamp: Date.now() - 25000,
-    level: "info",
-    source: "server",
-    text: "[Server] Preparing level \"world\"",
-  },
-  {
-    timestamp: Date.now() - 20000,
-    level: "info",
-    source: "server",
-    text: "[Server] Preparing start region for dimension minecraft:overworld",
-  },
-  {
-    timestamp: Date.now() - 15000,
-    level: "warn",
-    source: "server",
-    text: "[Server] Can't keep up! Is the server overloaded?",
-  },
-  {
-    timestamp: Date.now() - 10000,
-    level: "info",
-    source: "server",
-    text: '[Server] Done (4.231s)! For help, type "help"',
-  },
-  {
-    timestamp: Date.now() - 5000,
-    level: "debug",
-    source: "system",
-    text: "[BlockDev] File watcher initialized, monitoring 24 files",
-  },
-  {
-    timestamp: Date.now() - 2000,
-    level: "error",
-    source: "plugin",
-    text: "[MyPlugin] Failed to load config.yml: Invalid YAML syntax",
-  },
-];
-
 export function Workspace({ onBack }: WorkspaceProps) {
+  const rpc = useRPC();
   const [activeTab, setActiveTab] = useState("Console");
   const [selectedServer, setSelectedServer] = useState("paper-main");
   const [selectedProject, setSelectedProject] = useState<string | undefined>(
     "my-plugin"
   );
-  const [messages, setMessages] = useState<ConsoleMessage[]>(sampleMessages);
+  const [messages, setMessages] = useState<ConsoleMessage[]>([]);
   const [serverStatus, setServerStatus] = useState<ServerStatus>("stopped");
   const [autoDeployEnabled, setAutoDeployEnabled] = useState(false);
 
+  // Placeholder servers/projects (will be populated from workspace manifest later)
   const servers = [
     {
       id: "paper-main",
@@ -82,7 +40,49 @@ export function Workspace({ onBack }: WorkspaceProps) {
 
   const projects = [{ id: "my-plugin", name: "MyPlugin" }];
 
-  const handleCommand = (cmd: string) => {
+  // Subscribe to console output from main process
+  useEffect(() => {
+    const unsubscribe = onConsoleOutput((message) => {
+      setMessages((prev) => [...prev, message]);
+    });
+    return unsubscribe;
+  }, []);
+
+  // Subscribe to server status changes from main process
+  useEffect(() => {
+    const unsubscribe = onServerStatus((status: RunningProcess) => {
+      if (status.serverId === selectedServer) {
+        setServerStatus(status.status);
+      }
+    });
+    return unsubscribe;
+  }, [selectedServer]);
+
+  // Fetch initial server status on mount and when selected server changes
+  useEffect(() => {
+    let cancelled = false;
+
+    async function fetchStatus() {
+      try {
+        const status = await rpc.request("getServerStatus", {
+          serverId: selectedServer,
+        });
+        if (!cancelled && status) {
+          setServerStatus(status.status);
+        }
+      } catch (err) {
+        console.error("Failed to fetch server status:", err);
+      }
+    }
+
+    fetchStatus();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedServer]);
+
+  const handleCommand = async (cmd: string) => {
+    // Show the user command in the console immediately
     setMessages((prev) => [
       ...prev,
       {
@@ -92,12 +92,169 @@ export function Workspace({ onBack }: WorkspaceProps) {
         text: `> ${cmd}`,
       },
     ]);
+
+    try {
+      await rpc.request("sendServerCommand", {
+        serverId: selectedServer,
+        command: cmd,
+      });
+    } catch (err) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          timestamp: Date.now(),
+          level: "error" as const,
+          source: "system",
+          text: `Failed to send command: ${err instanceof Error ? err.message : String(err)}`,
+        },
+      ]);
+    }
   };
 
-  const handleStart = () => setServerStatus("starting");
-  const handleStop = () => setServerStatus("stopping");
-  const handleRestart = () => setServerStatus("starting");
-  const noop = () => {};
+  const handleStart = async () => {
+    setServerStatus("starting");
+    try {
+      const result = await rpc.request("startServer", {
+        serverId: selectedServer,
+      });
+      if (!result.success) {
+        setServerStatus("error");
+        setMessages((prev) => [
+          ...prev,
+          {
+            timestamp: Date.now(),
+            level: "error",
+            source: "system",
+            text: `Failed to start server: ${result.error || "unknown error"}`,
+          },
+        ]);
+      }
+    } catch (err) {
+      setServerStatus("error");
+      console.error("Failed to start server:", err);
+    }
+  };
+
+  const handleStop = async () => {
+    setServerStatus("stopping");
+    try {
+      const result = await rpc.request("stopServer", {
+        serverId: selectedServer,
+      });
+      if (!result.success) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            timestamp: Date.now(),
+            level: "error",
+            source: "system",
+            text: `Failed to stop server: ${result.error || "unknown error"}`,
+          },
+        ]);
+      }
+    } catch (err) {
+      console.error("Failed to stop server:", err);
+    }
+  };
+
+  const handleRestart = async () => {
+    setServerStatus("starting");
+    try {
+      const result = await rpc.request("restartServer", {
+        serverId: selectedServer,
+      });
+      if (!result.success) {
+        setServerStatus("error");
+        setMessages((prev) => [
+          ...prev,
+          {
+            timestamp: Date.now(),
+            level: "error",
+            source: "system",
+            text: `Failed to restart server: ${result.error || "unknown error"}`,
+          },
+        ]);
+      }
+    } catch (err) {
+      setServerStatus("error");
+      console.error("Failed to restart server:", err);
+    }
+  };
+
+  const handleBuild = async () => {
+    if (!selectedProject) return;
+    try {
+      const result = await rpc.request("buildProject", {
+        projectId: selectedProject,
+      });
+      setMessages((prev) => [
+        ...prev,
+        {
+          timestamp: Date.now(),
+          level: result.success ? "info" : "error",
+          source: "system",
+          text: result.success
+            ? `Build completed in ${result.duration}ms: ${result.artifactPath}`
+            : `Build failed: ${result.output}`,
+        },
+      ]);
+    } catch (err) {
+      console.error("Build failed:", err);
+    }
+  };
+
+  const handleDeploy = async () => {
+    if (!selectedProject) return;
+    try {
+      const result = await rpc.request("deployProject", {
+        projectId: selectedProject,
+        serverId: selectedServer,
+      });
+      setMessages((prev) => [
+        ...prev,
+        {
+          timestamp: Date.now(),
+          level: result.success ? "info" : "error",
+          source: "system",
+          text: result.success
+            ? "Deployment successful"
+            : `Deploy failed: ${result.error || "unknown error"}`,
+        },
+      ]);
+    } catch (err) {
+      console.error("Deploy failed:", err);
+    }
+  };
+
+  const handleReload = async () => {
+    try {
+      const result = await rpc.request("reloadServer", {
+        serverId: selectedServer,
+      });
+      setMessages((prev) => [
+        ...prev,
+        {
+          timestamp: Date.now(),
+          level: result.success ? "info" : "error",
+          source: "system",
+          text: result.success
+            ? `Server reloaded via ${result.method}`
+            : "Reload failed",
+        },
+      ]);
+    } catch (err) {
+      console.error("Reload failed:", err);
+    }
+  };
+
+  const handleToggleAutoDeploy = () => {
+    const newValue = !autoDeployEnabled;
+    setAutoDeployEnabled(newValue);
+    rpc.send("setAutoDeployEnabled", {
+      serverId: selectedServer,
+      enabled: newValue,
+    });
+  };
 
   return (
     <div className="flex h-screen w-screen overflow-hidden">
@@ -159,11 +316,11 @@ export function Workspace({ onBack }: WorkspaceProps) {
               onStart={handleStart}
               onStop={handleStop}
               onRestart={handleRestart}
-              onBuild={noop}
-              onDeploy={noop}
-              onReload={noop}
+              onBuild={handleBuild}
+              onDeploy={handleDeploy}
+              onReload={handleReload}
               autoDeployEnabled={autoDeployEnabled}
-              onToggleAutoDeploy={() => setAutoDeployEnabled(!autoDeployEnabled)}
+              onToggleAutoDeploy={handleToggleAutoDeploy}
               reloadCapability="hot"
             />
           </div>
