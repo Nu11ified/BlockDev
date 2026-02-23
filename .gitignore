@@ -2,8 +2,12 @@ node_modules/
 dist/
 build/
 .agent/
-CLAUDE.md
-DESIGN.md
 jre/
 *.jar
 .DS_Store
+
+# Claude agent files (local only)
+CLAUDE.md
+DESIGN.md
+prd.md
+docs/plans/
