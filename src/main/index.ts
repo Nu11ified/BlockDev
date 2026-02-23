@@ -5,7 +5,7 @@
 import { BrowserWindow, BrowserView, Utils } from "electrobun/bun";
 import { join, resolve } from "node:path";
 import { platform, homedir } from "node:os";
-import { mkdirSync, appendFileSync } from "node:fs";
+import { mkdirSync, appendFileSync, promises as fsp } from "node:fs";
 
 // ---------------------------------------------------------------------------
 // Path helper: expand leading ~/  to the user's home directory
@@ -150,6 +150,9 @@ const rpc = BrowserView.defineRPC<BlockDevRPC>({
             port: 25565,
             path: serverDir,
           };
+
+          // Ensure the server directory exists before downloading into it
+          await fsp.mkdir(serverDir, { recursive: true });
 
           // Download and set up the server jar
           const jarPath = await provider.downloadServer(mcVersion, build, serverDir);

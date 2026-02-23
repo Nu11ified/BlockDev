@@ -24,7 +24,11 @@ export default {
       codesign: !!process.env.ELECTROBUN_DEVELOPER_ID,
       notarize: !!process.env.ELECTROBUN_APPLEID,
     },
-    linux: {},
-    win: {},
+    linux: {
+      icon: "assets/logo.png",
+    },
+    win: {
+      icon: "assets/logo.png",
+    },
   },
 } satisfies ElectrobunConfig;
