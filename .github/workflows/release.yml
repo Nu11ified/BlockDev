@@ -99,7 +99,19 @@ jobs:
           Write-Host "JRE downloaded to $jreDir"
 
       # ------------------------------------------------------------------
-      # 5. Build with Electrobun (stable environment)
+      # 5. Inject version from tag into electrobun.config.ts
+      #    Ensures the built app reports the correct version (e.g., 0.1.0-alpha.1)
+      # ------------------------------------------------------------------
+      - name: Inject version from tag
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          sed -i.bak "s/version: \".*\"/version: \"${VERSION}\"/" electrobun.config.ts
+          rm -f electrobun.config.ts.bak
+          echo "Injected version: ${VERSION}"
+
+      # ------------------------------------------------------------------
+      # 6. Build with Electrobun (stable environment)
       # ------------------------------------------------------------------
       - name: Build BlockDev
         env:
@@ -107,7 +119,7 @@ jobs:
         run: bunx electrobun build --env=stable --targets=$BUILD_TARGETS
 
       # ------------------------------------------------------------------
-      # 6. Upload build artifacts for the release job to collect
+      # 7. Upload build artifacts for the release job to collect
       # ------------------------------------------------------------------
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -135,8 +147,23 @@ jobs:
         uses: actions/download-artifact@v4
 
       # ------------------------------------------------------------------
-      # 2. Create GitHub Release
-      #    - Release name uses the full tag (e.g., "BlockDev v0.1.0")
+      # 2. Determine release channel from tag suffix
+      # ------------------------------------------------------------------
+      - name: Determine channel
+        id: channel
+        run: |
+          TAG="${{ github.ref_name }}"
+          if [[ "$TAG" == *"-alpha."* ]]; then
+            echo "label=Alpha" >> "$GITHUB_OUTPUT"
+          elif [[ "$TAG" == *"-beta."* ]]; then
+            echo "label=Beta" >> "$GITHUB_OUTPUT"
+          else
+            echo "label=Stable" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ------------------------------------------------------------------
+      # 3. Create GitHub Release
+      #    - Release name includes the channel label (e.g., "BlockDev v0.1.0 (Alpha)")
       #    - Pre-release flag is set automatically when the tag contains
       #      a hyphen (e.g., v0.1.0-beta.1)
       #    - Release notes are auto-generated from commits since the
@@ -145,7 +172,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: BlockDev ${{ github.ref_name }}
+          name: "BlockDev ${{ github.ref_name }} (${{ steps.channel.outputs.label }})"
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
           generate_release_notes: true
