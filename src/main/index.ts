@@ -747,22 +747,29 @@ const rpc = BrowserView.defineRPC<BlockDevRPC>({
           const { projectPath, editor } = params;
           const os = platform();
 
+          // Resolve relative project paths (e.g. "projects/my-plugin") against workspace
+          const workspacePath = workspaceManager.getCurrentPath();
+          const absolutePath = workspacePath
+            ? join(workspacePath, projectPath)
+            : projectPath;
+
           let cmd: string[];
           switch (editor) {
             case "vscode":
-              cmd = ["code", projectPath];
+              cmd = ["code", absolutePath];
               break;
             case "cursor":
-              cmd = ["cursor", projectPath];
+              cmd = ["cursor", absolutePath];
               break;
             case "zed":
-              cmd = ["zed", projectPath];
+              cmd = ["zed", absolutePath];
               break;
             case "intellij":
               if (os === "darwin") {
-                cmd = ["open", "-a", "IntelliJ IDEA", projectPath];
+                // open -na passes the path as an argument to IntelliJ
+                cmd = ["open", "-na", "IntelliJ IDEA.app", "--args", absolutePath];
               } else {
-                cmd = ["idea", projectPath];
+                cmd = ["idea", absolutePath];
               }
               break;
             default:
