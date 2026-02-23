@@ -105,7 +105,13 @@ jobs:
           rm "$CERT_FILE"
 
       # ------------------------------------------------------------------
-      # 6. Build with Electrobun
+      # 6. Build CSS through Tailwind
+      # ------------------------------------------------------------------
+      - name: Build CSS
+        run: bun scripts/build-css.ts
+
+      # ------------------------------------------------------------------
+      # 7. Build with Electrobun
       # ------------------------------------------------------------------
       - name: Build BlockDev
         env:
@@ -117,7 +123,7 @@ jobs:
         run: bunx electrobun build --env=stable --targets=$BUILD_TARGETS
 
       # ------------------------------------------------------------------
-      # 7. Upload build artifacts
+      # 8. Upload build artifacts
       # ------------------------------------------------------------------
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

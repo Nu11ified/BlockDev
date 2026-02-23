@@ -1,6 +1,9 @@
 $ErrorActionPreference = "Stop"
 Set-Location (Join-Path $PSScriptRoot "..")
 
+Write-Host "=== Building CSS ===" -ForegroundColor Cyan
+bun scripts/build-css.ts
+
 Write-Host "=== Fetching JRE ===" -ForegroundColor Cyan
 $jreDir = Join-Path $PSScriptRoot ".." "jre"
 New-Item -ItemType Directory -Force -Path $jreDir | Out-Null

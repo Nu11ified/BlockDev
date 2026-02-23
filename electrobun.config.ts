@@ -17,7 +17,7 @@ export default {
     },
     copy: {
       "src/renderer/index.html": "views/mainview/index.html",
-      "src/renderer/index.css": "views/mainview/index.css",
+      "dist/renderer/index.css": "views/mainview/index.css",
     },
     mac: {
       codesign: !!process.env.ELECTROBUN_DEVELOPER_ID,
