@@ -429,14 +429,6 @@ export function Workspace({ onBack }: WorkspaceProps) {
           )}
           {activeTab === "Projects" && (
             <>
-              {showAddServer && (
-                <div className="mb-4">
-                  <AddServerDialog
-                    onSubmit={handleAddServer}
-                    onCancel={() => setShowAddServer(false)}
-                  />
-                </div>
-              )}
               <ProjectsPanel
                 serverFramework={currentServer?.framework}
                 mcVersion={currentServer?.mcVersion}
@@ -481,6 +473,18 @@ export function Workspace({ onBack }: WorkspaceProps) {
           />
         </div>
       </div>
+
+      {/* Add Server Dialog (modal) */}
+      {showAddServer && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div className="w-full max-w-sm">
+            <AddServerDialog
+              onSubmit={handleAddServer}
+              onCancel={() => setShowAddServer(false)}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Confirmation Dialogs */}
       {deleteServerTarget && (
