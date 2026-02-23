@@ -39,23 +39,30 @@ const listeners = {
 
 const rpc = Electroview.defineRPC<BlockDevRPC>({
   handlers: {
-    consoleOutput: (message) => {
-      listeners.console.forEach((fn) => fn(message));
-    },
-    serverStatusChanged: (status) => {
-      listeners.status.forEach((fn) => fn(status));
-    },
-    downloadProgress: (progress) => {
-      listeners.progress.forEach((fn) => fn(progress));
-    },
-    fileChanged: (change) => {
-      listeners.fileChange.forEach((fn) => fn(change));
-    },
-    buildOutput: (output) => {
-      listeners.buildOutput.forEach((fn) => fn(output));
+    messages: {
+      consoleOutput: (message) => {
+        listeners.console.forEach((fn) => fn(message));
+      },
+      serverStatusChanged: (status) => {
+        listeners.status.forEach((fn) => fn(status));
+      },
+      downloadProgress: (progress) => {
+        listeners.progress.forEach((fn) => fn(progress));
+      },
+      fileChanged: (change) => {
+        listeners.fileChange.forEach((fn) => fn(change));
+      },
+      buildOutput: (output) => {
+        listeners.buildOutput.forEach((fn) => fn(output));
+      },
     },
   },
 });
+
+// Create Electroview instance to establish the WebSocket transport to Bun.
+// This calls initSocketToBun() and rpc.setTransport(), which is required
+// for any RPC communication between the webview and the main process.
+const electroview = new Electroview({ rpc });
 
 // --- Hook: returns the singleton rpc instance ---
 

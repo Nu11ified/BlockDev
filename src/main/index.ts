@@ -2,7 +2,7 @@
 // Main process entry point. Creates the window first for immediate feedback,
 // then initializes services and loads plugins in the background.
 
-import { BrowserWindow, defineElectrobunRPC } from "electrobun/bun";
+import { BrowserWindow, BrowserView } from "electrobun/bun";
 import { join } from "node:path";
 import { platform, homedir } from "node:os";
 import { mkdirSync, appendFileSync } from "node:fs";
@@ -101,10 +101,10 @@ function resolveServer(serverId: string): ServerInstance {
 }
 
 // ---------------------------------------------------------------------------
-// Build the RPC instance using Electrobun's defineElectrobunRPC
+// Build the RPC instance using Electrobun's BrowserView.defineRPC
 // ---------------------------------------------------------------------------
 
-const rpc = defineElectrobunRPC<BlockDevRPC, "bun">("bun", {
+const rpc = BrowserView.defineRPC<BlockDevRPC>({
   handlers: {
     requests: {
       // --- Workspace operations ---
