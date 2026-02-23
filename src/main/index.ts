@@ -111,7 +111,7 @@ function resolveServer(serverId: string): ServerInstance {
     jvmArgs: serverConfig.jvmArgs,
     port: serverConfig.port,
     path: join(workspacePath, "servers", serverConfig.id),
-    jarPath: serverConfig.path || "",
+    jarPath: "", // Let the framework plugin determine the jar name via getStartCommand
   };
 }
 
@@ -182,7 +182,11 @@ const rpc = BrowserView.defineRPC<BlockDevRPC>({
       getCurrentWorkspace: async () => {
         try {
           if (!servicesReady) return null;
-          return workspaceManager.getCurrent();
+          const ws = workspaceManager.getCurrent();
+          if (!ws) {
+            console.log("getCurrentWorkspace: no workspace is currently open");
+          }
+          return ws;
         } catch {
           return null;
         }
@@ -243,6 +247,7 @@ const rpc = BrowserView.defineRPC<BlockDevRPC>({
 
       startServer: async (params) => {
         try {
+          console.log(`startServer called for: ${params.serverId}`);
           if (!servicesReady) {
             return { success: false, error: "Services are still initializing" };
           }
