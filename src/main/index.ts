@@ -257,6 +257,19 @@ const rpc = BrowserView.defineRPC<BlockDevRPC>({
             return { success: false, error: `Unknown framework: ${instance.framework}` };
           }
 
+          // Ensure Java is available (may trigger auto-download of Temurin JRE 21)
+          try {
+            const javaPath = await javaManager.getJavaPath();
+            onConsole(params.serverId, {
+              timestamp: Date.now(),
+              level: "info",
+              source: "system",
+              text: `Using Java: ${javaPath}`,
+            });
+          } catch (javaErr) {
+            return { success: false, error: javaErr instanceof Error ? javaErr.message : String(javaErr) };
+          }
+
           await serverController.start(instance, provider, onConsole, onStatus, onLineHook);
 
           // Start resource monitoring after the server process is running
