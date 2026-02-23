@@ -1,7 +1,8 @@
-# BlockDev Cross-Platform Build Workflow
+# BlockDev Cross-Platform Build & Auto-Release Workflow
 #
-# Builds BlockDev for macOS (arm64 + x64), Linux (x64), and Windows (x64)
-# using Electrobun with bundled Eclipse Temurin JRE 21.
+# On push to main: builds all platforms, then auto-bumps the patch version,
+# tags the commit, and creates a GitHub Release with artifacts attached.
+# On PRs: builds only (no release).
 
 name: Build
 
@@ -18,7 +19,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -26,15 +27,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # macOS builds both arm64 and x64 targets
           - os: macos-latest
             targets: macos-arm64,macos-x64
             artifact-name: blockdev-macos
-          # Linux builds x64 only
           - os: ubuntu-latest
             targets: linux-x64
             artifact-name: blockdev-linux
-          # Windows builds x64 only
           - os: windows-latest
             targets: win-x64
             artifact-name: blockdev-windows
@@ -43,31 +41,17 @@ jobs:
     name: Build (${{ matrix.os }})
 
     steps:
-      # ------------------------------------------------------------------
-      # 1. Checkout repository
-      # ------------------------------------------------------------------
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ------------------------------------------------------------------
-      # 2. Install Bun runtime
-      # ------------------------------------------------------------------
       - name: Install Bun
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
 
-      # ------------------------------------------------------------------
-      # 3. Install project dependencies
-      # ------------------------------------------------------------------
       - name: Install dependencies
         run: bun install
 
-      # ------------------------------------------------------------------
-      # 4. Install Eclipse Temurin JRE 21 via actions/setup-java
-      #    Uses GitHub's cached downloads instead of the Adoptium API.
-      #    Copies to jre/ so Electrobun can bundle it with the app.
-      # ------------------------------------------------------------------
       - name: Set up JRE 21
         uses: actions/setup-java@v4
         with:
@@ -79,9 +63,6 @@ jobs:
         shell: bash
         run: cp -r "$JAVA_HOME" jre
 
-      # ------------------------------------------------------------------
-      # 5. Import macOS signing certificate (skipped when secrets are not set)
-      # ------------------------------------------------------------------
       - name: Import signing certificate
         if: runner.os == 'macOS' && env.MACOS_CERTIFICATE != ''
         env:
@@ -104,15 +85,9 @@ jobs:
 
           rm "$CERT_FILE"
 
-      # ------------------------------------------------------------------
-      # 6. Build CSS through Tailwind
-      # ------------------------------------------------------------------
       - name: Build CSS
         run: bun scripts/build-css.ts
 
-      # ------------------------------------------------------------------
-      # 7. Build with Electrobun
-      # ------------------------------------------------------------------
       - name: Build BlockDev
         env:
           BUILD_TARGETS: ${{ matrix.targets }}
@@ -122,9 +97,6 @@ jobs:
           ELECTROBUN_TEAMID: ${{ secrets.ELECTROBUN_TEAMID }}
         run: bunx electrobun build --env=stable --targets=$BUILD_TARGETS
 
-      # ------------------------------------------------------------------
-      # 8. Upload build artifacts
-      # ------------------------------------------------------------------
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -133,3 +105,79 @@ jobs:
             build/
             dist/
           if-no-files-found: error
+
+  # --------------------------------------------------------------------
+  # Auto-release — only runs on push to main after all builds succeed
+  # Determines the next version by bumping the patch of the latest tag,
+  # creates a new tag, and publishes a GitHub Release with all artifacts.
+  # --------------------------------------------------------------------
+  release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    name: Auto Release
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine next version
+        id: version
+        run: |
+          # Get the latest version tag, default to v0.0.0 if none exist
+          LATEST_TAG=$(git tag -l 'v*' --sort=-v:refname | head -1)
+          if [ -z "$LATEST_TAG" ]; then
+            LATEST_TAG="v0.0.0"
+          fi
+
+          echo "Latest tag: $LATEST_TAG"
+
+          # Strip the 'v' prefix and any pre-release suffix
+          SEMVER="${LATEST_TAG#v}"
+          SEMVER="${SEMVER%%-*}"
+
+          # Split into major.minor.patch
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$SEMVER"
+          PATCH=$((PATCH + 1))
+          NEXT_VERSION="v${MAJOR}.${MINOR}.${PATCH}"
+
+          echo "Next version: $NEXT_VERSION"
+          echo "tag=$NEXT_VERSION" >> "$GITHUB_OUTPUT"
+          echo "version=${NEXT_VERSION#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Create tag
+        env:
+          NEXT_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$NEXT_TAG" -m "Release $NEXT_TAG"
+          git push origin "$NEXT_TAG"
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: "BlockDev ${{ steps.version.outputs.tag }}"
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          append_body: true
+          body: |
+            ## Install
+
+            ```bash
+            curl -fsSL https://raw.githubusercontent.com/Nu11ified/BlockDev/main/install.sh | bash
+            ```
+
+            > **macOS users:** The install script handles Gatekeeper automatically.
+            > If you download manually, run: `xattr -cr /Applications/BlockDev.app`
+          files: |
+            blockdev-macos/**/*
+            blockdev-linux/**/*
+            blockdev-windows/**/*
