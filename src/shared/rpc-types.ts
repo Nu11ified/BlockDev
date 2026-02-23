@@ -164,6 +164,27 @@ type BunRequests = {
     params: {};
     response: ProjectEntry[];
   };
+  // --- CRUD operations ---
+  addServer: {
+    params: { framework: string; mcVersion: string; build: string };
+    response: { success: boolean; serverId?: string; error?: string };
+  };
+  removeServer: {
+    params: { serverId: string; deleteFiles: boolean };
+    response: { success: boolean; error?: string };
+  };
+  removeProject: {
+    params: { projectId: string; deleteFiles: boolean };
+    response: { success: boolean; error?: string };
+  };
+  deleteWorkspace: {
+    params: { deleteFiles: boolean };
+    response: { success: boolean; error?: string };
+  };
+  removeFromRecents: {
+    params: { path: string };
+    response: { success: boolean; error?: string };
+  };
 };
 
 // === Bun-side messages (fire-and-forget from renderer to main) ===

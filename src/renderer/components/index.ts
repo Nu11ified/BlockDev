@@ -16,3 +16,6 @@ export { ResourcePackList } from "./ResourcePackList";
 export { CreateResourcePackDialog } from "./CreateResourcePackDialog";
 export { CreateProjectDialog } from "./CreateProjectDialog";
 export { ProjectsPanel } from "./ProjectsPanel";
+export { ConfirmDialog } from "./ConfirmDialog";
+export { AddServerDialog } from "./AddServerDialog";
+export { FileExplorerPanel } from "./FileExplorerPanel";

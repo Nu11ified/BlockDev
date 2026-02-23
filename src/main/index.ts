@@ -480,15 +480,32 @@ const rpc = BrowserView.defineRPC<BlockDevRPC>({
             throw new Error(`Project "${params.projectId}" not found in workspace`);
           }
 
+          const workspacePath = workspaceManager.getCurrentPath()!;
           const instance = resolveServer(params.serverId);
+
+          // Script projects: copy script files directly to server
+          if (project.type === "script") {
+            const projectDir = join(workspacePath, project.path);
+            const scriptsSourceDir = join(projectDir, "server_scripts");
+            const scriptsTargetDir = join(instance.path, "kubejs", "server_scripts");
+
+            await fsp.mkdir(scriptsTargetDir, { recursive: true });
+            const files = await fsp.readdir(scriptsSourceDir).catch(() => [] as string[]);
+            for (const file of files) {
+              if (file.endsWith(".js") || file.endsWith(".ts")) {
+                await fsp.copyFile(join(scriptsSourceDir, file), join(scriptsTargetDir, file));
+              }
+            }
+            return { success: true };
+          }
+
+          // Gradle projects: deploy the built artifact via provider
           const provider = registry.get(instance.framework);
           if (!provider) {
             return { success: false, error: `Unknown framework: ${instance.framework}` };
           }
 
-          const workspacePath = workspaceManager.getCurrentPath()!;
           const artifactPath = join(workspacePath, project.path, project.artifactPath);
-
           const artifact: BuildResult = {
             success: true,
             artifactPath,
@@ -790,6 +807,120 @@ const rpc = BrowserView.defineRPC<BlockDevRPC>({
           return workspace?.projects ?? [];
         } catch {
           return [];
+        }
+      },
+
+      // --- CRUD operations ---
+
+      addServer: async (params) => {
+        try {
+          if (!servicesReady) {
+            return { success: false, error: "Services are still initializing" };
+          }
+
+          const workspace = workspaceManager.getCurrent();
+          const workspacePath = workspaceManager.getCurrentPath();
+          if (!workspace || !workspacePath) {
+            return { success: false, error: "No workspace is currently open" };
+          }
+
+          const provider = registry.get(params.framework);
+          if (!provider) {
+            return { success: false, error: `Unknown framework: ${params.framework}` };
+          }
+
+          const serverId = `${params.framework}-${Date.now()}`;
+          const serverDir = join(workspacePath, "servers", serverId);
+          await fsp.mkdir(serverDir, { recursive: true });
+
+          const serverConfig = {
+            id: serverId,
+            framework: params.framework,
+            mcVersion: params.mcVersion,
+            build: params.build,
+            jvmArgs: ["-Xmx2G", "-Xms1G"],
+            port: 25565 + workspace.servers.length, // offset port to avoid conflicts
+            path: serverDir,
+          };
+
+          await provider.downloadServer(params.mcVersion, params.build, serverDir);
+          await provider.setupServer(serverConfig);
+          await workspaceManager.addServer(serverConfig);
+
+          return { success: true, serverId };
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : String(err);
+          return { success: false, error: message };
+        }
+      },
+
+      removeServer: async (params) => {
+        try {
+          if (!servicesReady) {
+            return { success: false, error: "Services are still initializing" };
+          }
+
+          // Stop the server if it's running
+          const status = serverController.getStatus(params.serverId);
+          if (status && (status.status === "running" || status.status === "starting")) {
+            processMonitor.stopMonitoring(params.serverId);
+            await serverController.stop(params.serverId);
+          }
+
+          // Disable auto-deploy if active
+          autoDeployState.delete(params.serverId);
+          fileWatcher.unwatch(`autodeploy-${params.serverId}`);
+
+          await workspaceManager.removeServer(params.serverId, params.deleteFiles);
+          return { success: true };
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : String(err);
+          return { success: false, error: message };
+        }
+      },
+
+      removeProject: async (params) => {
+        try {
+          if (!servicesReady) {
+            return { success: false, error: "Services are still initializing" };
+          }
+          await workspaceManager.removeProject(params.projectId, params.deleteFiles);
+          return { success: true };
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : String(err);
+          return { success: false, error: message };
+        }
+      },
+
+      deleteWorkspace: async (params) => {
+        try {
+          if (!servicesReady) {
+            return { success: false, error: "Services are still initializing" };
+          }
+
+          // Stop all running servers first
+          fileWatcher.unwatchAll();
+          processMonitor.stopAll();
+          await serverController.stopAll();
+
+          await workspaceManager.deleteWorkspace(params.deleteFiles);
+          return { success: true };
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : String(err);
+          return { success: false, error: message };
+        }
+      },
+
+      removeFromRecents: async (params) => {
+        try {
+          if (!servicesReady) {
+            return { success: false, error: "Services are still initializing" };
+          }
+          await workspaceManager.removeFromRecents(params.path);
+          return { success: true };
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : String(err);
+          return { success: false, error: message };
         }
       },
     },

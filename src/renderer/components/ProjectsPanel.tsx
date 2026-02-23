@@ -5,6 +5,7 @@ import {
   LuFolderOpen,
   LuHammer,
   LuUpload,
+  LuX,
 } from "react-icons/lu";
 import type { ProjectEntry, ProjectTemplate } from "../../shared/types";
 import { useRPC } from "../hooks/useRPC";
@@ -22,10 +23,12 @@ interface ProjectsPanelProps {
   serverFramework?: string;
   mcVersion?: string;
   selectedServer?: string;
+  selectedProject?: string;
   onProjectCreated?: () => void;
+  onProjectDeleted?: () => void;
 }
 
-export function ProjectsPanel({ serverFramework, mcVersion, selectedServer, onProjectCreated }: ProjectsPanelProps) {
+export function ProjectsPanel({ serverFramework, mcVersion, selectedServer, selectedProject, onProjectCreated, onProjectDeleted }: ProjectsPanelProps) {
   const rpc = useRPC();
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
@@ -97,6 +100,18 @@ export function ProjectsPanel({ serverFramework, mcVersion, selectedServer, onPr
     }
   };
 
+  const handleDeleteProject = async (projectId: string) => {
+    try {
+      const result = await rpc.request("removeProject", { projectId, deleteFiles: false });
+      if (result.success) {
+        setProjects((prev) => prev.filter((p) => p.id !== projectId));
+        onProjectDeleted?.();
+      }
+    } catch (err) {
+      console.error("Failed to delete project:", err);
+    }
+  };
+
   return (
     <div className="flex-1 flex flex-col gap-4 min-h-0 overflow-y-auto">
       {/* Header */}
@@ -135,10 +150,12 @@ export function ProjectsPanel({ serverFramework, mcVersion, selectedServer, onPr
         </div>
       )}
 
-      {projects.map((project) => (
+      {projects.map((project) => {
+        const isSelected = project.id === selectedProject;
+        return (
         <div
           key={project.id}
-          className="bg-card border border-border-subtle rounded-xl p-4 flex flex-col gap-3"
+          className={`bg-card border rounded-xl p-4 flex flex-col gap-3 ${isSelected ? "border-accent/50 ring-1 ring-accent/20" : "border-border-subtle"}`}
         >
           {/* Project info row */}
           <div className="flex items-center gap-3">
@@ -161,6 +178,13 @@ export function ProjectsPanel({ serverFramework, mcVersion, selectedServer, onPr
                 {project.path}
               </p>
             </div>
+            <button
+              onClick={() => handleDeleteProject(project.id)}
+              className="p-1.5 rounded-lg text-text-dim hover:text-red-400 hover:bg-red-500/10 transition-all cursor-pointer shrink-0"
+              title="Remove project"
+            >
+              <LuX className="text-xs" />
+            </button>
           </div>
 
           {/* Editor buttons */}
@@ -201,7 +225,7 @@ export function ProjectsPanel({ serverFramework, mcVersion, selectedServer, onPr
             </div>
           )}
 
-          {/* Script projects: folder shortcut */}
+          {/* Script projects: folder shortcut + deploy */}
           {project.type === "script" && (
             <div className="flex items-center gap-2 pt-1 border-t border-border-subtle">
               <button
@@ -211,11 +235,20 @@ export function ProjectsPanel({ serverFramework, mcVersion, selectedServer, onPr
                 <LuFolderOpen className="text-xs" />
                 Open Scripts Folder
               </button>
+              <button
+                onClick={() => handleDeploy(project.id)}
+                disabled={!selectedServer}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs text-text-muted hover:text-text-primary hover:bg-white/5 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <LuUpload className="text-xs" />
+                Deploy Scripts
+              </button>
               <span className="text-[10px] text-accent/60 ml-auto">Hot reload</span>
             </div>
           )}
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

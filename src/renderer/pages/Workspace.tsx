@@ -6,10 +6,13 @@ import { Console } from "../components/Console";
 import { DevToolsPanel } from "../components/DevToolsPanel";
 import { ResourcePanel } from "../components/ResourcePanel";
 import { ProjectsPanel } from "../components/ProjectsPanel";
+import { FileExplorerPanel } from "../components/FileExplorerPanel";
 import { Sidebar } from "../components/Sidebar";
 import { ActionBar } from "../components/ActionBar";
 import { StatusBar } from "../components/StatusBar";
 import { TabBar } from "../components/TabBar";
+import { ConfirmDialog } from "../components/ConfirmDialog";
+import { AddServerDialog } from "../components/AddServerDialog";
 import { useRPC, onConsoleOutput, onServerStatus, onAutoDeployStatus } from "../hooks/useRPC";
 
 interface WorkspaceProps {
@@ -18,7 +21,7 @@ interface WorkspaceProps {
 
 type ServerStatus = "running" | "stopped" | "starting" | "stopping" | "error";
 
-const TABS = ["Console", "Dev Tools", "Projects", "Resources"];
+const TABS = ["Console", "Dev Tools", "Projects", "Files", "Resources"];
 
 export function Workspace({ onBack }: WorkspaceProps) {
   const rpc = useRPC();
@@ -30,6 +33,12 @@ export function Workspace({ onBack }: WorkspaceProps) {
   const [serverStatus, setServerStatus] = useState<ServerStatus>("stopped");
   const [autoDeployEnabled, setAutoDeployEnabled] = useState(false);
 
+  // Dialog state
+  const [showAddServer, setShowAddServer] = useState(false);
+  const [deleteServerTarget, setDeleteServerTarget] = useState<string | null>(null);
+  const [deleteProjectTarget, setDeleteProjectTarget] = useState<string | null>(null);
+  const [showDeleteWorkspace, setShowDeleteWorkspace] = useState(false);
+
   // Fetch the current workspace manifest on mount
   useEffect(() => {
     let cancelled = false;
@@ -39,7 +48,6 @@ export function Workspace({ onBack }: WorkspaceProps) {
         const ws = await rpc.request("getCurrentWorkspace", {});
         if (!cancelled && ws) {
           setManifest(ws);
-          // Auto-select the first server and project
           if (ws.servers.length > 0 && !selectedServer) {
             setSelectedServer(ws.servers[0].id);
           }
@@ -71,6 +79,7 @@ export function Workspace({ onBack }: WorkspaceProps) {
   }));
 
   const currentServer = manifest?.servers.find((s) => s.id === selectedServer);
+  const currentProject = manifest?.projects.find((p) => p.id === selectedProject);
   const serverDisplayName = currentServer
     ? `${currentServer.framework.charAt(0).toUpperCase() + currentServer.framework.slice(1)} ${currentServer.mcVersion}`
     : manifest?.name || "Workspace";
@@ -93,7 +102,7 @@ export function Workspace({ onBack }: WorkspaceProps) {
     return unsubscribe;
   }, [selectedServer]);
 
-  // Subscribe to auto-deploy status events → append to console
+  // Subscribe to auto-deploy status events
   useEffect(() => {
     const unsubscribe = onAutoDeployStatus((event) => {
       setMessages((prev) => [
@@ -109,7 +118,7 @@ export function Workspace({ onBack }: WorkspaceProps) {
     return unsubscribe;
   }, []);
 
-  // Re-fetch workspace manifest (e.g. after creating a project)
+  // Re-fetch workspace manifest
   const refreshManifest = async () => {
     try {
       const ws = await rpc.request("getCurrentWorkspace", {});
@@ -143,35 +152,22 @@ export function Workspace({ onBack }: WorkspaceProps) {
     };
   }, [selectedServer]);
 
+  // --- Action handlers ---
+
   const handleClearConsole = () => setMessages([]);
 
   const handleCommand = async (cmd: string) => {
     if (!selectedServer) return;
-    // Show the user command in the console immediately
     setMessages((prev) => [
       ...prev,
-      {
-        timestamp: Date.now(),
-        level: "info" as const,
-        source: "user",
-        text: `> ${cmd}`,
-      },
+      { timestamp: Date.now(), level: "info" as const, source: "user", text: `> ${cmd}` },
     ]);
-
     try {
-      await rpc.request("sendServerCommand", {
-        serverId: selectedServer,
-        command: cmd,
-      });
+      await rpc.request("sendServerCommand", { serverId: selectedServer, command: cmd });
     } catch (err) {
       setMessages((prev) => [
         ...prev,
-        {
-          timestamp: Date.now(),
-          level: "error" as const,
-          source: "system",
-          text: `Failed to send command: ${err instanceof Error ? err.message : String(err)}`,
-        },
+        { timestamp: Date.now(), level: "error" as const, source: "system", text: `Failed to send command: ${err instanceof Error ? err.message : String(err)}` },
       ]);
     }
   };
@@ -180,24 +176,13 @@ export function Workspace({ onBack }: WorkspaceProps) {
     if (!selectedServer) return;
     setServerStatus("starting");
     try {
-      const result = await rpc.request("startServer", {
-        serverId: selectedServer,
-      });
+      const result = await rpc.request("startServer", { serverId: selectedServer });
       if (!result.success) {
         setServerStatus("error");
-        setMessages((prev) => [
-          ...prev,
-          {
-            timestamp: Date.now(),
-            level: "error",
-            source: "system",
-            text: `Failed to start server: ${result.error || "unknown error"}`,
-          },
-        ]);
+        setMessages((prev) => [...prev, { timestamp: Date.now(), level: "error", source: "system", text: `Failed to start server: ${result.error || "unknown error"}` }]);
       }
     } catch (err) {
       setServerStatus("error");
-      console.error("Failed to start server:", err);
     }
   };
 
@@ -205,19 +190,9 @@ export function Workspace({ onBack }: WorkspaceProps) {
     if (!selectedServer) return;
     setServerStatus("stopping");
     try {
-      const result = await rpc.request("stopServer", {
-        serverId: selectedServer,
-      });
+      const result = await rpc.request("stopServer", { serverId: selectedServer });
       if (!result.success) {
-        setMessages((prev) => [
-          ...prev,
-          {
-            timestamp: Date.now(),
-            level: "error",
-            source: "system",
-            text: `Failed to stop server: ${result.error || "unknown error"}`,
-          },
-        ]);
+        setMessages((prev) => [...prev, { timestamp: Date.now(), level: "error", source: "system", text: `Failed to stop server: ${result.error || "unknown error"}` }]);
       }
     } catch (err) {
       console.error("Failed to stop server:", err);
@@ -228,33 +203,25 @@ export function Workspace({ onBack }: WorkspaceProps) {
     if (!selectedServer) return;
     setServerStatus("starting");
     try {
-      const result = await rpc.request("restartServer", {
-        serverId: selectedServer,
-      });
+      const result = await rpc.request("restartServer", { serverId: selectedServer });
       if (!result.success) {
         setServerStatus("error");
-        setMessages((prev) => [
-          ...prev,
-          {
-            timestamp: Date.now(),
-            level: "error",
-            source: "system",
-            text: `Failed to restart server: ${result.error || "unknown error"}`,
-          },
-        ]);
+        setMessages((prev) => [...prev, { timestamp: Date.now(), level: "error", source: "system", text: `Failed to restart server: ${result.error || "unknown error"}` }]);
       }
     } catch (err) {
       setServerStatus("error");
-      console.error("Failed to restart server:", err);
     }
   };
 
   const handleBuild = async () => {
     if (!selectedProject) return;
+    // Skip build for script projects
+    if (currentProject?.type === "script") {
+      setMessages((prev) => [...prev, { timestamp: Date.now(), level: "info", source: "system", text: "Script projects don't need building — deploy copies files directly." }]);
+      return;
+    }
     try {
-      const result = await rpc.request("buildProject", {
-        projectId: selectedProject,
-      });
+      const result = await rpc.request("buildProject", { projectId: selectedProject });
       setMessages((prev) => [
         ...prev,
         {
@@ -273,20 +240,38 @@ export function Workspace({ onBack }: WorkspaceProps) {
 
   const handleDeploy = async () => {
     if (!selectedProject || !selectedServer) return;
+
+    // Script projects: copy scripts directly instead of deploying a JAR
+    if (currentProject?.type === "script") {
+      setMessages((prev) => [...prev, { timestamp: Date.now(), level: "info", source: "system", text: "Deploying scripts to server..." }]);
+      // Trigger auto-deploy pipeline for scripts by toggling auto-deploy briefly
+      // For now, use the standard deploy which will route correctly via the fixed KubeJS provider
+      try {
+        const result = await rpc.request("deployProject", { projectId: selectedProject, serverId: selectedServer });
+        setMessages((prev) => [
+          ...prev,
+          {
+            timestamp: Date.now(),
+            level: result.success ? "info" : "error",
+            source: "system",
+            text: result.success ? "Scripts deployed successfully" : `Deploy failed: ${result.error || "unknown error"}`,
+          },
+        ]);
+      } catch (err) {
+        console.error("Deploy failed:", err);
+      }
+      return;
+    }
+
     try {
-      const result = await rpc.request("deployProject", {
-        projectId: selectedProject,
-        serverId: selectedServer,
-      });
+      const result = await rpc.request("deployProject", { projectId: selectedProject, serverId: selectedServer });
       setMessages((prev) => [
         ...prev,
         {
           timestamp: Date.now(),
           level: result.success ? "info" : "error",
           source: "system",
-          text: result.success
-            ? "Deployment successful"
-            : `Deploy failed: ${result.error || "unknown error"}`,
+          text: result.success ? "Deployment successful" : `Deploy failed: ${result.error || "unknown error"}`,
         },
       ]);
     } catch (err) {
@@ -297,18 +282,14 @@ export function Workspace({ onBack }: WorkspaceProps) {
   const handleReload = async () => {
     if (!selectedServer) return;
     try {
-      const result = await rpc.request("reloadServer", {
-        serverId: selectedServer,
-      });
+      const result = await rpc.request("reloadServer", { serverId: selectedServer });
       setMessages((prev) => [
         ...prev,
         {
           timestamp: Date.now(),
           level: result.success ? "info" : "error",
           source: "system",
-          text: result.success
-            ? `Server reloaded via ${result.method}`
-            : "Reload failed",
+          text: result.success ? `Server reloaded via ${result.method}` : "Reload failed",
         },
       ]);
     } catch (err) {
@@ -320,10 +301,82 @@ export function Workspace({ onBack }: WorkspaceProps) {
     if (!selectedServer) return;
     const newValue = !autoDeployEnabled;
     setAutoDeployEnabled(newValue);
-    rpc.send("setAutoDeployEnabled", {
-      serverId: selectedServer,
-      enabled: newValue,
-    });
+    rpc.send("setAutoDeployEnabled", { serverId: selectedServer, enabled: newValue });
+  };
+
+  // --- CRUD handlers ---
+
+  const handleAddServer = async (framework: string, mcVersion: string, build: string) => {
+    try {
+      const result = await rpc.request("addServer", { framework, mcVersion, build });
+      if (result.success) {
+        setShowAddServer(false);
+        await refreshManifest();
+        if (result.serverId) setSelectedServer(result.serverId);
+      } else {
+        setMessages((prev) => [...prev, { timestamp: Date.now(), level: "error", source: "system", text: `Failed to add server: ${result.error}` }]);
+      }
+    } catch (err) {
+      console.error("Failed to add server:", err);
+    }
+  };
+
+  const handleConfirmDeleteServer = async (deleteFiles: boolean) => {
+    if (!deleteServerTarget) return;
+    try {
+      const result = await rpc.request("removeServer", { serverId: deleteServerTarget, deleteFiles });
+      if (result.success) {
+        await refreshManifest();
+        // Select another server if we deleted the selected one
+        if (selectedServer === deleteServerTarget) {
+          const ws = await rpc.request("getCurrentWorkspace", {});
+          setSelectedServer(ws?.servers[0]?.id ?? null);
+        }
+      } else {
+        setMessages((prev) => [...prev, { timestamp: Date.now(), level: "error", source: "system", text: `Failed to remove server: ${result.error}` }]);
+      }
+    } catch (err) {
+      console.error("Failed to remove server:", err);
+    }
+    setDeleteServerTarget(null);
+  };
+
+  const handleConfirmDeleteProject = async (deleteFiles: boolean) => {
+    if (!deleteProjectTarget) return;
+    try {
+      const result = await rpc.request("removeProject", { projectId: deleteProjectTarget, deleteFiles });
+      if (result.success) {
+        await refreshManifest();
+        if (selectedProject === deleteProjectTarget) {
+          setSelectedProject(undefined);
+        }
+      } else {
+        setMessages((prev) => [...prev, { timestamp: Date.now(), level: "error", source: "system", text: `Failed to remove project: ${result.error}` }]);
+      }
+    } catch (err) {
+      console.error("Failed to remove project:", err);
+    }
+    setDeleteProjectTarget(null);
+  };
+
+  const handleConfirmDeleteWorkspace = async (deleteFiles: boolean) => {
+    try {
+      const result = await rpc.request("deleteWorkspace", { deleteFiles });
+      if (result.success) {
+        onBack(); // Navigate back to home
+      } else {
+        setMessages((prev) => [...prev, { timestamp: Date.now(), level: "error", source: "system", text: `Failed to delete workspace: ${result.error}` }]);
+      }
+    } catch (err) {
+      console.error("Failed to delete workspace:", err);
+    }
+    setShowDeleteWorkspace(false);
+  };
+
+  // Clicking a project in sidebar navigates to Projects tab
+  const handleSelectProject = (id: string) => {
+    setSelectedProject(id);
+    setActiveTab("Projects");
   };
 
   return (
@@ -335,8 +388,11 @@ export function Workspace({ onBack }: WorkspaceProps) {
         selectedServer={selectedServer ?? undefined}
         selectedProject={selectedProject}
         onSelectServer={setSelectedServer}
-        onSelectProject={(id) => setSelectedProject(id)}
+        onSelectProject={handleSelectProject}
         onCreateProject={() => setActiveTab("Projects")}
+        onAddServer={() => setShowAddServer(true)}
+        onDeleteServer={(id) => setDeleteServerTarget(id)}
+        onDeleteProject={(id) => setDeleteProjectTarget(id)}
       />
 
       {/* Main content area */}
@@ -347,9 +403,15 @@ export function Workspace({ onBack }: WorkspaceProps) {
             Back
           </Button>
           <div className="h-4 w-px bg-border-subtle" />
-          <h2 className="text-sm font-medium text-text-primary truncate">
+          <h2 className="text-sm font-medium text-text-primary truncate flex-1">
             {serverDisplayName}
           </h2>
+          <button
+            onClick={() => setShowDeleteWorkspace(true)}
+            className="px-2 py-1 rounded-lg text-[10px] text-text-dim hover:text-red-400 hover:bg-red-500/10 transition-all cursor-pointer"
+          >
+            Delete Workspace
+          </button>
         </GlassNav>
 
         {/* TabBar */}
@@ -366,13 +428,26 @@ export function Workspace({ onBack }: WorkspaceProps) {
             <DevToolsPanel serverId={selectedServer} serverStatus={serverStatus} />
           )}
           {activeTab === "Projects" && (
-            <ProjectsPanel
-              serverFramework={currentServer?.framework}
-              mcVersion={currentServer?.mcVersion}
-              selectedServer={selectedServer ?? undefined}
-              onProjectCreated={refreshManifest}
-            />
+            <>
+              {showAddServer && (
+                <div className="mb-4">
+                  <AddServerDialog
+                    onSubmit={handleAddServer}
+                    onCancel={() => setShowAddServer(false)}
+                  />
+                </div>
+              )}
+              <ProjectsPanel
+                serverFramework={currentServer?.framework}
+                mcVersion={currentServer?.mcVersion}
+                selectedServer={selectedServer ?? undefined}
+                selectedProject={selectedProject}
+                onProjectCreated={refreshManifest}
+                onProjectDeleted={refreshManifest}
+              />
+            </>
           )}
+          {activeTab === "Files" && <FileExplorerPanel />}
           {activeTab === "Resources" && selectedServer && (
             <ResourcePanel serverId={selectedServer} />
           )}
@@ -406,6 +481,38 @@ export function Workspace({ onBack }: WorkspaceProps) {
           />
         </div>
       </div>
+
+      {/* Confirmation Dialogs */}
+      {deleteServerTarget && (
+        <ConfirmDialog
+          title="Remove Server"
+          message={`Remove "${servers.find((s) => s.id === deleteServerTarget)?.name || deleteServerTarget}" from this workspace?`}
+          confirmLabel="Remove Server"
+          showDeleteFiles
+          onConfirm={handleConfirmDeleteServer}
+          onCancel={() => setDeleteServerTarget(null)}
+        />
+      )}
+      {deleteProjectTarget && (
+        <ConfirmDialog
+          title="Remove Project"
+          message={`Remove "${deleteProjectTarget}" from this workspace?`}
+          confirmLabel="Remove Project"
+          showDeleteFiles
+          onConfirm={handleConfirmDeleteProject}
+          onCancel={() => setDeleteProjectTarget(null)}
+        />
+      )}
+      {showDeleteWorkspace && (
+        <ConfirmDialog
+          title="Delete Workspace"
+          message={`Delete "${manifest?.name || "this workspace"}"? This will close the workspace and return to the home screen.`}
+          confirmLabel="Delete Workspace"
+          showDeleteFiles
+          onConfirm={handleConfirmDeleteWorkspace}
+          onCancel={() => setShowDeleteWorkspace(false)}
+        />
+      )}
     </div>
   );
 }

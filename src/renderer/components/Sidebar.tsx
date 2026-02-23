@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { LuServer, LuBox, LuCode, LuChevronDown, LuChevronRight, LuPlus } from "react-icons/lu";
+import { LuServer, LuBox, LuCode, LuChevronDown, LuChevronRight, LuPlus, LuX } from "react-icons/lu";
 import { SectionLabel } from "./SectionLabel";
 import { StatusDot } from "./StatusDot";
 
@@ -26,6 +26,9 @@ interface SidebarProps {
   onSelectServer: (id: string) => void;
   onSelectProject: (id: string) => void;
   onCreateProject?: () => void;
+  onAddServer?: () => void;
+  onDeleteServer?: (id: string) => void;
+  onDeleteProject?: (id: string) => void;
 }
 
 const frameworkIcons: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -48,6 +51,9 @@ export function Sidebar({
   onSelectServer,
   onSelectProject,
   onCreateProject,
+  onAddServer,
+  onDeleteServer,
+  onDeleteProject,
 }: SidebarProps) {
   const [serversOpen, setServersOpen] = useState(true);
   const [projectsOpen, setProjectsOpen] = useState(true);
@@ -56,38 +62,62 @@ export function Sidebar({
     <aside className="w-56 bg-[#0a0a0a] border-r border-border-subtle flex flex-col shrink-0 overflow-y-auto">
       {/* Servers section */}
       <div className="p-3">
-        <button
-          onClick={() => setServersOpen(!serversOpen)}
-          className="flex items-center gap-1.5 w-full mb-2 cursor-pointer"
-        >
-          {serversOpen ? (
-            <LuChevronDown className="text-text-dim text-xs" />
-          ) : (
-            <LuChevronRight className="text-text-dim text-xs" />
+        <div className="flex items-center gap-1.5 mb-2">
+          <button
+            onClick={() => setServersOpen(!serversOpen)}
+            className="flex items-center gap-1.5 flex-1 cursor-pointer"
+          >
+            {serversOpen ? (
+              <LuChevronDown className="text-text-dim text-xs" />
+            ) : (
+              <LuChevronRight className="text-text-dim text-xs" />
+            )}
+            <SectionLabel>Servers</SectionLabel>
+          </button>
+          {onAddServer && (
+            <button
+              onClick={onAddServer}
+              className="p-0.5 rounded text-text-dim hover:text-accent hover:bg-white/5 transition-all cursor-pointer"
+              title="Add server"
+            >
+              <LuPlus className="text-xs" />
+            </button>
           )}
-          <SectionLabel>Servers</SectionLabel>
-        </button>
+        </div>
         {serversOpen && (
           <div className="flex flex-col gap-0.5">
             {servers.map((server) => {
               const FrameworkIcon = frameworkIcons[server.framework] || LuServer;
               const isSelected = server.id === selectedServer;
               return (
-                <button
-                  key={server.id}
-                  onClick={() => onSelectServer(server.id)}
-                  className={`flex items-center gap-2 px-2 py-1.5 rounded-md text-left transition-colors duration-150 cursor-pointer ${
-                    isSelected
-                      ? "bg-card text-text-primary"
-                      : "text-text-muted hover:bg-card"
-                  }`}
-                >
-                  <StatusDot status={server.status} />
-                  <span className="text-sm truncate flex-1">{server.name}</span>
-                  <span className="text-[10px] text-text-dim px-1.5 py-0.5 rounded bg-[#1a1a1a]">
-                    {frameworkLabels[server.framework] || server.framework}
-                  </span>
-                </button>
+                <div key={server.id} className="group relative">
+                  <button
+                    onClick={() => onSelectServer(server.id)}
+                    className={`flex items-center gap-2 px-2 py-1.5 rounded-md text-left transition-colors duration-150 cursor-pointer w-full ${
+                      isSelected
+                        ? "bg-card text-text-primary"
+                        : "text-text-muted hover:bg-card"
+                    }`}
+                  >
+                    <StatusDot status={server.status} />
+                    <span className="text-sm truncate flex-1">{server.name}</span>
+                    <span className="text-[10px] text-text-dim px-1.5 py-0.5 rounded bg-[#1a1a1a] group-hover:hidden">
+                      {frameworkLabels[server.framework] || server.framework}
+                    </span>
+                  </button>
+                  {onDeleteServer && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onDeleteServer(server.id);
+                      }}
+                      className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1 rounded text-text-dim hover:text-red-400 hover:bg-red-500/10 transition-all cursor-pointer hidden group-hover:block"
+                      title="Remove server"
+                    >
+                      <LuX className="text-[10px]" />
+                    </button>
+                  )}
+                </div>
               );
             })}
           </div>
@@ -123,23 +153,36 @@ export function Sidebar({
             {projects.map((project) => {
               const isSelected = project.id === selectedProject;
               return (
-                <button
-                  key={project.id}
-                  onClick={() => onSelectProject(project.id)}
-                  className={`flex items-center gap-2 px-2 py-1.5 rounded-md text-left transition-colors duration-150 cursor-pointer ${
-                    isSelected
-                      ? "bg-card text-text-primary"
-                      : "text-text-muted hover:bg-card"
-                  }`}
-                >
-                  <LuCode className="text-sm shrink-0" />
-                  <span className="text-sm truncate flex-1">{project.name}</span>
-                  {project.type && (
-                    <span className="text-[9px] text-text-dim px-1 py-0.5 rounded bg-[#1a1a1a]">
-                      {project.type}
-                    </span>
+                <div key={project.id} className="group relative">
+                  <button
+                    onClick={() => onSelectProject(project.id)}
+                    className={`flex items-center gap-2 px-2 py-1.5 rounded-md text-left transition-colors duration-150 cursor-pointer w-full ${
+                      isSelected
+                        ? "bg-card text-text-primary"
+                        : "text-text-muted hover:bg-card"
+                    }`}
+                  >
+                    <LuCode className="text-sm shrink-0" />
+                    <span className="text-sm truncate flex-1">{project.name}</span>
+                    {project.type && (
+                      <span className="text-[9px] text-text-dim px-1 py-0.5 rounded bg-[#1a1a1a] group-hover:hidden">
+                        {project.type}
+                      </span>
+                    )}
+                  </button>
+                  {onDeleteProject && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onDeleteProject(project.id);
+                      }}
+                      className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1 rounded text-text-dim hover:text-red-400 hover:bg-red-500/10 transition-all cursor-pointer hidden group-hover:block"
+                      title="Remove project"
+                    >
+                      <LuX className="text-[10px]" />
+                    </button>
                   )}
-                </button>
+                </div>
               );
             })}
           </div>

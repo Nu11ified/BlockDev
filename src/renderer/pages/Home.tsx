@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { LuPlus, LuFolderOpen, LuServer, LuBox, LuCode, LuLoader, LuArrowRight } from "react-icons/lu";
+import { LuPlus, LuFolderOpen, LuServer, LuBox, LuCode, LuLoader, LuArrowRight, LuX } from "react-icons/lu";
 import { Button, Card, SectionLabel } from "../components";
 import { useRPC } from "../hooks/useRPC";
 import type { RecentWorkspace } from "../../shared/types";
@@ -156,6 +156,18 @@ export function Home({ onCreateWorkspace, onOpenWorkspace }: HomeProps) {
                   <span className="text-xs text-text-dim shrink-0">
                     {formatRelativeTime(ws.lastOpened)}
                   </span>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      rpc.request("removeFromRecents", { path: ws.path }).then(() => {
+                        setRecentWorkspaces((prev) => prev.filter((w) => w.path !== ws.path));
+                      }).catch(() => {});
+                    }}
+                    className="p-1.5 rounded-lg text-text-dim hover:text-red-400 hover:bg-red-500/10 transition-all cursor-pointer shrink-0"
+                    title="Remove from recents"
+                  >
+                    <LuX className="text-xs" />
+                  </button>
                 </div>
               </Card>
             );
