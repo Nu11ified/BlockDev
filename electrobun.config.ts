@@ -17,6 +17,7 @@ export default {
     },
     copy: {
       "src/renderer/index.html": "views/mainview/index.html",
+      "src/renderer/index.css": "views/mainview/index.css",
     },
     mac: {},
     linux: {},

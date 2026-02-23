@@ -1,6 +1,7 @@
-const root = document.getElementById("root");
-if (root) {
-  const heading = document.createElement("h1");
-  heading.textContent = "BlockDev";
-  root.appendChild(heading);
-}
+import React from "react";
+import { createRoot } from "react-dom/client";
+import { App } from "./App";
+import "./index.css";
+
+const root = createRoot(document.getElementById("root")!);
+root.render(React.createElement(App));
