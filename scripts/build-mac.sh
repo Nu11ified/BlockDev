@@ -9,6 +9,6 @@ echo "=== Fetching JRE ==="
 bash scripts/fetch-jre.sh
 
 echo "=== Building BlockDev for macOS ==="
-electrobun build --env=stable --targets=macos-arm64,macos-x64
+bunx electrobun build --env=stable --targets=macos-arm64,macos-x64
 
 echo "=== Done ==="

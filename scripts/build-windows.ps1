@@ -19,6 +19,6 @@ Expand-Archive -Path $archive -DestinationPath $jreDir -Force
 Remove-Item $archive
 
 Write-Host "=== Building BlockDev for Windows ===" -ForegroundColor Cyan
-electrobun build --env=stable --targets=win-x64
+bunx electrobun build --env=stable --targets=win-x64
 
 Write-Host "=== Done ===" -ForegroundColor Green

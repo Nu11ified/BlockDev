@@ -9,6 +9,6 @@ echo "=== Fetching JRE ==="
 bash scripts/fetch-jre.sh
 
 echo "=== Building BlockDev for Linux ==="
-electrobun build --env=stable --targets=linux-x64
+bunx electrobun build --env=stable --targets=linux-x64
 
 echo "=== Done ==="
