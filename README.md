@@ -2,6 +2,11 @@
 
 A cross-platform desktop application for Minecraft developers. BlockDev orchestrates development workflows across Paper, Fabric, and KubeJS frameworks — managing server instances, watching file changes, building projects, and deploying artifacts automatically.
 
+<p align="center">
+  <img src="assets/landing.png" width="49%" alt="Landing page" />
+  <img src="assets/devtool.png" width="49%" alt="Dev Tools" />
+</p>
+
 ## Features
 
 - **Multi-framework support** — Paper plugin development, Fabric mod development, and KubeJS modpack scripting
