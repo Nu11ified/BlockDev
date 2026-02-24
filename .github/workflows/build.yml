@@ -1,8 +1,8 @@
-# BlockDev Cross-Platform Build & Auto-Release Workflow
+# BlockDev Cross-Platform Build Workflow
 #
-# On push to main: builds all platforms, then auto-bumps the patch version,
-# tags the commit, and creates a GitHub Release with artifacts attached.
-# On PRs from same repo: builds only (no release). Fork PRs are skipped.
+# On push to main: builds all platforms and uploads artifacts.
+# On PRs from same repo: builds only. Fork PRs are skipped.
+# Releases are created manually — see README for instructions.
 
 name: Build
 
@@ -17,9 +17,6 @@ on:
 concurrency:
   group: build-${{ github.ref }}
   cancel-in-progress: true
-
-permissions:
-  contents: write
 
 jobs:
   build:
@@ -145,90 +142,3 @@ jobs:
             build/**/*.zip
             build/**/*-Setup*
           if-no-files-found: warn
-
-  # --------------------------------------------------------------------
-  # Auto-release — only runs on push to main after all builds succeed
-  # --------------------------------------------------------------------
-  release:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: build
-    runs-on: ubuntu-latest
-    name: Auto Release
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Determine next version
-        id: version
-        run: |
-          LATEST_TAG=$(git tag -l 'v*' --sort=-v:refname | head -1)
-          if [ -z "$LATEST_TAG" ]; then
-            LATEST_TAG="v0.0.0"
-          fi
-
-          echo "Latest tag: $LATEST_TAG"
-
-          SEMVER="${LATEST_TAG#v}"
-          SEMVER="${SEMVER%%-*}"
-
-          IFS='.' read -r MAJOR MINOR PATCH <<< "$SEMVER"
-          PATCH=$((PATCH + 1))
-          NEXT_VERSION="v${MAJOR}.${MINOR}.${PATCH}"
-
-          echo "Next version: $NEXT_VERSION"
-          echo "tag=$NEXT_VERSION" >> "$GITHUB_OUTPUT"
-          echo "version=${NEXT_VERSION#v}" >> "$GITHUB_OUTPUT"
-
-      - name: Create tag
-        env:
-          NEXT_TAG: ${{ steps.version.outputs.tag }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "$NEXT_TAG" -m "Release $NEXT_TAG"
-          git push origin "$NEXT_TAG"
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: release-assets
-
-      - name: List downloaded assets
-        run: find release-assets -type f | head -50
-
-      # Flatten all artifacts into a single directory for clean release
-      - name: Prepare release files
-        run: |
-          mkdir -p release-files
-          find release-assets -type f \( \
-            -name "*.dmg" -o \
-            -name "*.tar.gz" -o \
-            -name "*.tar.zst" -o \
-            -name "*.exe" -o \
-            -name "*.zip" \
-          \) -exec cp {} release-files/ \;
-          echo "Release files:"
-          ls -lah release-files/
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          name: "BlockDev ${{ steps.version.outputs.tag }}"
-          draft: false
-          prerelease: false
-          generate_release_notes: true
-          append_body: true
-          body: |
-            ## Install
-
-            ```bash
-            curl -fsSL https://raw.githubusercontent.com/Nu11ified/BlockDev/main/install.sh | bash
-            ```
-
-            > **macOS users:** The install script handles Gatekeeper automatically.
-            > If you download manually, run: `xattr -cr /Applications/BlockDev.app`
-          files: release-files/*
