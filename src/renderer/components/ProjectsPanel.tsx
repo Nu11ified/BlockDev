@@ -7,7 +7,7 @@ import {
   LuUpload,
   LuX,
 } from "react-icons/lu";
-import type { ProjectEntry, ProjectTemplate } from "../../shared/types";
+import type { ProjectEntry, ProjectTemplate, ProjectLanguage } from "../../shared/types";
 import { useRPC } from "../hooks/useRPC";
 import { CreateProjectDialog } from "./CreateProjectDialog";
 
@@ -53,6 +53,7 @@ export function ProjectsPanel({ serverFramework, mcVersion, selectedServer, sele
     name: string,
     version: string,
     packageName?: string,
+    language?: ProjectLanguage,
   ) => {
     try {
       const result = await rpc.request("createProject", {
@@ -60,6 +61,7 @@ export function ProjectsPanel({ serverFramework, mcVersion, selectedServer, sele
         name,
         mcVersion: version,
         packageName,
+        language,
       });
       if (result.success) {
         setShowCreateDialog(false);

@@ -3,7 +3,7 @@
 
 import { mkdir, writeFile, chmod } from "node:fs/promises";
 import { join } from "node:path";
-import type { ProjectEntry, ProjectTemplate } from "../../shared/types";
+import type { ProjectEntry, ProjectTemplate, ProjectLanguage } from "../../shared/types";
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -15,15 +15,16 @@ export async function scaffoldProject(
   name: string,
   mcVersion: string,
   packageName?: string,
+  language: ProjectLanguage = "java",
 ): Promise<ProjectEntry> {
   const projectDir = join(workspacePath, "projects", name);
   await mkdir(projectDir, { recursive: true });
 
   switch (template) {
     case "paper-plugin":
-      return scaffoldPaperPlugin(projectDir, name, mcVersion, packageName);
+      return scaffoldPaperPlugin(projectDir, name, mcVersion, packageName, language);
     case "fabric-mod":
-      return scaffoldFabricMod(projectDir, name, mcVersion, packageName);
+      return scaffoldFabricMod(projectDir, name, mcVersion, packageName, language);
     case "kubejs-scripts":
       return scaffoldKubeJSScripts(projectDir, name);
   }
@@ -38,16 +39,20 @@ async function scaffoldPaperPlugin(
   name: string,
   mcVersion: string,
   packageName?: string,
+  language: ProjectLanguage = "java",
 ): Promise<ProjectEntry> {
   const pkg = packageName || `com.example.${sanitize(name)}`;
   const className = toPascalCase(name) + "Plugin";
-  const pkgPath = pkg.replace(/\./g, "/");
+  const isKotlin = language === "kotlin";
 
   // build.gradle.kts
+  const kotlinPlugin = isKotlin ? `\n    kotlin("jvm") version "2.1.0"` : "";
+  const kotlinDep = isKotlin ? `\n    implementation("org.jetbrains.kotlin:kotlin-stdlib")` : "";
+
   await writeFile(
     join(projectDir, "build.gradle.kts"),
     `plugins {
-    java
+    java${kotlinPlugin}
 }
 
 group = "${pkg}"
@@ -59,7 +64,7 @@ repositories {
 }
 
 dependencies {
-    compileOnly("io.papermc.paper:paper-api:${mcVersion}-R0.1-SNAPSHOT")
+    compileOnly("io.papermc.paper:paper-api:${mcVersion}-R0.1-SNAPSHOT")${kotlinDep}
 }
 
 java {
@@ -81,13 +86,33 @@ tasks.jar {
   // Gradle wrapper files
   await writeGradleWrapper(projectDir);
 
-  // Java source
-  const srcDir = join(projectDir, "src", "main", "java", ...pkg.split("."));
+  // Source files
+  const srcLang = isKotlin ? "kotlin" : "java";
+  const srcDir = join(projectDir, "src", "main", srcLang, ...pkg.split("."));
   await mkdir(srcDir, { recursive: true });
 
-  await writeFile(
-    join(srcDir, `${className}.java`),
-    `package ${pkg};
+  if (isKotlin) {
+    await writeFile(
+      join(srcDir, `${className}.kt`),
+      `package ${pkg}
+
+import org.bukkit.plugin.java.JavaPlugin
+
+class ${className} : JavaPlugin() {
+    override fun onEnable() {
+        logger.info("${name} enabled!")
+    }
+
+    override fun onDisable() {
+        logger.info("${name} disabled.")
+    }
+}
+`,
+    );
+  } else {
+    await writeFile(
+      join(srcDir, `${className}.java`),
+      `package ${pkg};
 
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -103,7 +128,8 @@ public class ${className} extends JavaPlugin {
     }
 }
 `,
-  );
+    );
+  }
 
   // plugin.yml
   const resourceDir = join(projectDir, "src", "main", "resources");
@@ -138,12 +164,15 @@ async function scaffoldFabricMod(
   name: string,
   mcVersion: string,
   packageName?: string,
+  language: ProjectLanguage = "java",
 ): Promise<ProjectEntry> {
   const pkg = packageName || `com.example.${sanitize(name)}`;
   const className = toPascalCase(name) + "Mod";
   const modId = sanitize(name);
+  const isKotlin = language === "kotlin";
 
   // gradle.properties
+  const kotlinProps = isKotlin ? `\n# Fabric Kotlin\nfabric_kotlin_version=1.13.1+kotlin.2.1.0` : "";
   await writeFile(
     join(projectDir, "gradle.properties"),
     `# Fabric mod properties
@@ -154,7 +183,7 @@ fabric_version=0.110.5+${mcVersion}
 # Mod properties
 mod_version=1.0.0
 maven_group=${pkg}
-archives_base_name=${name}
+archives_base_name=${name}${kotlinProps}
 `,
   );
 
@@ -174,11 +203,14 @@ rootProject.name = "${name}"
   );
 
   // build.gradle
+  const kotlinBuildPlugin = isKotlin ? `\n    id "org.jetbrains.kotlin.jvm" version "2.1.0"` : "";
+  const kotlinDep = isKotlin ? `\n    modImplementation "net.fabricmc:fabric-language-kotlin:\${project.fabric_kotlin_version}"` : "";
+
   await writeFile(
     join(projectDir, "build.gradle"),
     `plugins {
     id "fabric-loom" version "1.9-SNAPSHOT"
-    id "java"
+    id "java"${kotlinBuildPlugin}
 }
 
 version = project.mod_version
@@ -192,7 +224,7 @@ dependencies {
     minecraft "com.mojang:minecraft:\${project.minecraft_version}"
     mappings "net.fabricmc:yarn:\${project.minecraft_version}+build.1:v2"
     modImplementation "net.fabricmc:fabric-loader:\${project.loader_version}"
-    modImplementation "net.fabricmc.fabric-api:fabric-api:\${project.fabric_version}"
+    modImplementation "net.fabricmc.fabric-api:fabric-api:\${project.fabric_version}"${kotlinDep}
 }
 
 java {
@@ -208,13 +240,35 @@ jar {
   // Gradle wrapper
   await writeGradleWrapper(projectDir);
 
-  // Java source
-  const srcDir = join(projectDir, "src", "main", "java", ...pkg.split("."));
+  // Source files
+  const srcLang = isKotlin ? "kotlin" : "java";
+  const srcDir = join(projectDir, "src", "main", srcLang, ...pkg.split("."));
   await mkdir(srcDir, { recursive: true });
 
-  await writeFile(
-    join(srcDir, `${className}.java`),
-    `package ${pkg};
+  if (isKotlin) {
+    await writeFile(
+      join(srcDir, `${className}.kt`),
+      `package ${pkg}
+
+import net.fabricmc.api.ModInitializer
+import org.slf4j.LoggerFactory
+
+class ${className} : ModInitializer {
+    companion object {
+        const val MOD_ID = "${modId}"
+        val LOGGER = LoggerFactory.getLogger(MOD_ID)!!
+    }
+
+    override fun onInitialize() {
+        LOGGER.info("${name} initialized!")
+    }
+}
+`,
+    );
+  } else {
+    await writeFile(
+      join(srcDir, `${className}.java`),
+      `package ${pkg};
 
 import net.fabricmc.api.ModInitializer;
 import org.slf4j.Logger;
@@ -230,11 +284,24 @@ public class ${className} implements ModInitializer {
     }
 }
 `,
-  );
+    );
+  }
 
   // fabric.mod.json
   const resourceDir = join(projectDir, "src", "main", "resources");
   await mkdir(resourceDir, { recursive: true });
+
+  const entrypoint = isKotlin
+    ? { main: [{ adapter: "kotlin", value: `${pkg}.${className}` }] }
+    : { main: [`${pkg}.${className}`] };
+
+  const depends: Record<string, string> = {
+    fabricloader: ">=0.16.0",
+    minecraft: `~${mcVersion}`,
+    java: ">=21",
+    "fabric-api": "*",
+  };
+  if (isKotlin) depends["fabric-language-kotlin"] = ">=1.13.0";
 
   await writeFile(
     join(resourceDir, "fabric.mod.json"),
@@ -246,15 +313,8 @@ public class ${className} implements ModInitializer {
         name: name,
         description: "A Fabric mod scaffolded by BlockDev",
         environment: "*",
-        entrypoints: {
-          main: [`${pkg}.${className}`],
-        },
-        depends: {
-          fabricloader: ">=0.16.0",
-          minecraft: `~${mcVersion}`,
-          java: ">=21",
-          "fabric-api": "*",
-        },
+        entrypoints: entrypoint,
+        depends,
       },
       null,
       2,

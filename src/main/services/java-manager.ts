@@ -7,14 +7,25 @@ const TEMURIN_BASE = "https://api.adoptium.net/v3/binary/latest/21/ga";
 const MIN_JAVA_MAJOR = 17;
 const BLOCKDEV_JRE_DIR = join(homedir(), ".blockdev", "jre");
 
+export type JavaSetupProgressCallback = (stage: "downloading" | "extracting" | "ready" | "error", message: string) => void;
+
 export class JavaManager {
   private bundledJrePath: string | null = null;
+  private onProgress: JavaSetupProgressCallback | null = null;
 
   constructor(private appResourcePath: string) {
     const jrePath = join(appResourcePath, "jre");
     if (existsSync(jrePath)) {
       this.bundledJrePath = jrePath;
     }
+  }
+
+  setProgressCallback(cb: JavaSetupProgressCallback): void {
+    this.onProgress = cb;
+  }
+
+  private reportProgress(stage: "downloading" | "extracting" | "ready" | "error", message: string): void {
+    this.onProgress?.(stage, message);
   }
 
   async getJavaPath(): Promise<string> {
@@ -115,6 +126,7 @@ export class JavaManager {
     const archivePath = join(BLOCKDEV_JRE_DIR, `temurin-21${archiveExt}`);
 
     console.log(`Downloading Temurin JRE 21 from ${url}...`);
+    this.reportProgress("downloading", "Downloading Java runtime (Temurin JRE 21)...");
 
     const response = await fetch(url, {
       headers: { "User-Agent": "BlockDev/0.1.0" },
@@ -128,11 +140,12 @@ export class JavaManager {
     await Bun.write(archivePath, buffer);
 
     console.log("Extracting JRE...");
+    this.reportProgress("extracting", "Extracting Java runtime...");
 
     if (isWindows) {
-      // Use PowerShell to extract zip on Windows
+      // Use PowerShell to extract zip on Windows (hidden window to avoid scary CMD popup)
       const proc = Bun.spawn(
-        ["powershell", "-Command", `Expand-Archive -Path '${archivePath}' -DestinationPath '${BLOCKDEV_JRE_DIR}' -Force`],
+        ["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", `Expand-Archive -Path '${archivePath}' -DestinationPath '${BLOCKDEV_JRE_DIR}' -Force`],
         { stdout: "pipe", stderr: "pipe" },
       );
       const exitCode = await proc.exited;
@@ -170,6 +183,7 @@ export class JavaManager {
 
     const version = await this.getJavaVersion(javaBin);
     console.log(`Temurin JRE installed: Java ${version}`);
+    this.reportProgress("ready", `Java ${version} is ready`);
 
     return javaBin;
   }

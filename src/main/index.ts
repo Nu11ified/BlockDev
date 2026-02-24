@@ -36,6 +36,7 @@ import { ProcessMonitor } from "./services/process-monitor";
 import { ResourceManager } from "./services/resource-manager";
 import { createPluginRegistry, loadBuiltinPlugins } from "./plugins/plugin-loader";
 import { scaffoldProject } from "./services/project-scaffolder";
+import { PluginTimingsService } from "./services/plugin-timings";
 
 // ---------------------------------------------------------------------------
 // Crash logging — writes to ~/.blockdev/crash.log so errors survive app exit
@@ -78,6 +79,7 @@ let serverController: ServerController;
 let workspaceManager: WorkspaceManager;
 let fileWatcher: FileWatcher;
 let processMonitor: ProcessMonitor;
+let pluginTimings: PluginTimingsService;
 let resourceManager: ResourceManager;
 let registry: ReturnType<typeof createPluginRegistry>;
 let servicesReady = false;
@@ -629,6 +631,49 @@ const rpc = BrowserView.defineRPC<BlockDevRPC>({
         }
       },
 
+      // --- Plugin monitoring ---
+
+      getPluginTimings: async (params) => {
+        try {
+          if (!servicesReady) return [];
+          return pluginTimings.getTimings(params.serverId);
+        } catch {
+          return [];
+        }
+      },
+
+      startPluginMonitoring: async (params) => {
+        try {
+          if (!servicesReady) return { success: false };
+          pluginTimings.startMonitoring(
+            params.serverId,
+            async (serverId, command) => {
+              await serverController.sendCommand(serverId, command);
+            },
+            (timings) => {
+              try {
+                rpc.send("pluginTimingsUpdate", timings);
+              } catch {
+                // Window closed
+              }
+            },
+          );
+          return { success: true };
+        } catch {
+          return { success: false };
+        }
+      },
+
+      stopPluginMonitoring: async (params) => {
+        try {
+          if (!servicesReady) return { success: false };
+          pluginTimings.stopMonitoring(params.serverId);
+          return { success: true };
+        } catch {
+          return { success: false };
+        }
+      },
+
       // --- Resource/Texture Development ---
 
       listDirectory: async (params) => {
@@ -721,6 +766,7 @@ const rpc = BrowserView.defineRPC<BlockDevRPC>({
             params.name,
             params.mcVersion,
             params.packageName,
+            params.language,
           );
 
           // Add project to workspace manifest
@@ -997,6 +1043,11 @@ const rpc = BrowserView.defineRPC<BlockDevRPC>({
 // ---------------------------------------------------------------------------
 
 function onLineHook(serverId: string, line: string): void {
+  // Feed lines to plugin timings service for parsing
+  if (servicesReady) {
+    pluginTimings.processConsoleLine(serverId, line);
+  }
+
   // TPS patterns: "TPS from last 1m, 5m, 15m: 20.0, 20.0, 20.0"
   const tpsMatch = line.match(/TPS from last.*?:\s*([\d.]+)/);
   if (tpsMatch) {
@@ -1247,10 +1298,18 @@ try {
 try {
   downloadManager = new DownloadManager();
   javaManager = new JavaManager(import.meta.dir);
+  javaManager.setProgressCallback((stage, message) => {
+    try {
+      rpc.send("javaSetupProgress", { stage, message });
+    } catch {
+      // Window may not be ready yet
+    }
+  });
   serverController = new ServerController(javaManager);
   workspaceManager = new WorkspaceManager();
   fileWatcher = new FileWatcher();
   processMonitor = new ProcessMonitor();
+  pluginTimings = new PluginTimingsService();
   resourceManager = new ResourceManager();
   registry = createPluginRegistry();
 
@@ -1284,6 +1343,7 @@ async function shutdownGracefully(): Promise<void> {
 
   fileWatcher.unwatchAll();
   processMonitor.stopAll();
+  pluginTimings.stopAll();
 
   try {
     await serverController.stopAll();

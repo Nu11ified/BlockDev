@@ -1,11 +1,11 @@
 import React, { useState } from "react";
 import { LuX, LuCode } from "react-icons/lu";
-import type { ProjectTemplate } from "../../shared/types";
+import type { ProjectTemplate, ProjectLanguage } from "../../shared/types";
 
 interface CreateProjectDialogProps {
   serverFramework?: string;
   mcVersion?: string;
-  onSubmit: (template: ProjectTemplate, name: string, mcVersion: string, packageName?: string) => void;
+  onSubmit: (template: ProjectTemplate, name: string, mcVersion: string, packageName?: string, language?: ProjectLanguage) => void;
   onCancel: () => void;
 }
 
@@ -29,6 +29,7 @@ export function CreateProjectDialog({ serverFramework, mcVersion: defaultMcVersi
   const [name, setName] = useState("");
   const [mcVersion, setMcVersion] = useState(defaultMcVersion || "1.21.4");
   const [packageName, setPackageName] = useState("");
+  const [language, setLanguage] = useState<ProjectLanguage>("java");
 
   const selectedTemplate = TEMPLATES.find((t) => t.value === template)!;
 
@@ -36,7 +37,8 @@ export function CreateProjectDialog({ serverFramework, mcVersion: defaultMcVersi
     e.preventDefault();
     const trimmedName = name.trim();
     if (!trimmedName) return;
-    onSubmit(template, trimmedName, mcVersion, packageName.trim() || undefined);
+    const lang = template === "kubejs-scripts" ? undefined : language;
+    onSubmit(template, trimmedName, mcVersion, packageName.trim() || undefined, lang);
   };
 
   const isValid = name.trim().length > 0;
@@ -74,6 +76,31 @@ export function CreateProjectDialog({ serverFramework, mcVersion: defaultMcVersi
             ))}
           </select>
         </div>
+
+        {/* Language Toggle (hidden for KubeJS) */}
+        {template !== "kubejs-scripts" && (
+          <div>
+            <label className="text-[10px] uppercase tracking-widest text-text-dim font-medium">
+              Language
+            </label>
+            <div className="flex gap-2 mt-1">
+              {(["java", "kotlin"] as const).map((lang) => (
+                <button
+                  key={lang}
+                  type="button"
+                  onClick={() => setLanguage(lang)}
+                  className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all cursor-pointer ${
+                    language === lang
+                      ? "bg-accent text-black"
+                      : "bg-card border border-border-subtle text-text-muted hover:text-text-primary hover:border-accent/50"
+                  }`}
+                >
+                  {lang === "java" ? "Java" : "Kotlin"}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Project Name */}
         <div>

@@ -5,7 +5,7 @@
 
 import { Electroview } from "electrobun/view";
 import type { BlockDevRPC } from "../../shared/rpc-types";
-import type { ConsoleMessage, RunningProcess, ServerResourceStats, AutoDeployEvent } from "../../shared/types";
+import type { ConsoleMessage, RunningProcess, ServerResourceStats, AutoDeployEvent, PluginTimingData } from "../../shared/types";
 
 // --- Listener types ---
 
@@ -26,6 +26,8 @@ type BuildOutputListener = (output: {
 }) => void;
 type ResourceStatsListener = (stats: ServerResourceStats) => void;
 type AutoDeployStatusListener = (event: AutoDeployEvent) => void;
+type JavaSetupProgressListener = (progress: { stage: "downloading" | "extracting" | "ready" | "error"; message: string }) => void;
+type PluginTimingsListener = (data: PluginTimingData[]) => void;
 
 // --- Listener registries ---
 
@@ -37,6 +39,8 @@ const listeners = {
   buildOutput: new Set<BuildOutputListener>(),
   resourceStats: new Set<ResourceStatsListener>(),
   autoDeployStatus: new Set<AutoDeployStatusListener>(),
+  javaSetupProgress: new Set<JavaSetupProgressListener>(),
+  pluginTimings: new Set<PluginTimingsListener>(),
 };
 
 // --- Module-level RPC singleton ---
@@ -65,6 +69,12 @@ const rpc = Electroview.defineRPC<BlockDevRPC>({
       },
       autoDeployStatus: (event) => {
         listeners.autoDeployStatus.forEach((fn) => fn(event));
+      },
+      javaSetupProgress: (progress) => {
+        listeners.javaSetupProgress.forEach((fn) => fn(progress));
+      },
+      pluginTimingsUpdate: (data) => {
+        listeners.pluginTimings.forEach((fn) => fn(data));
       },
     },
   },
@@ -129,5 +139,19 @@ export function onAutoDeployStatus(listener: AutoDeployStatusListener): () => vo
   listeners.autoDeployStatus.add(listener);
   return () => {
     listeners.autoDeployStatus.delete(listener);
+  };
+}
+
+export function onJavaSetupProgress(listener: JavaSetupProgressListener): () => void {
+  listeners.javaSetupProgress.add(listener);
+  return () => {
+    listeners.javaSetupProgress.delete(listener);
+  };
+}
+
+export function onPluginTimings(listener: PluginTimingsListener): () => void {
+  listeners.pluginTimings.add(listener);
+  return () => {
+    listeners.pluginTimings.delete(listener);
   };
 }

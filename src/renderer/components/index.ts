@@ -19,3 +19,4 @@ export { ProjectsPanel } from "./ProjectsPanel";
 export { ConfirmDialog } from "./ConfirmDialog";
 export { AddServerDialog } from "./AddServerDialog";
 export { FileExplorerPanel } from "./FileExplorerPanel";
+export { PluginTimingsPanel } from "./PluginTimingsPanel";

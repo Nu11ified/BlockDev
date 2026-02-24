@@ -44,6 +44,8 @@ export type ReloadCapability = "hot" | "warm" | "cold";
 // === Project Template & Auto-Deploy Types ===
 export type ProjectTemplate = "paper-plugin" | "fabric-mod" | "kubejs-scripts";
 
+export type ProjectLanguage = "java" | "kotlin";
+
 export interface AutoDeployEvent {
   projectId: string;
   serverId: string;
@@ -180,4 +182,12 @@ export interface FileContent {
   encoding: "utf-8" | "base64";
   size: number;
   lastModified: number;
+}
+
+// === Plugin Timings (Phase 5) ===
+export interface PluginTimingData {
+  name: string;
+  tickPercent: number;    // % of tick time consumed
+  memoryMB?: number;      // estimated memory if available
+  eventCount?: number;    // registered event listeners
 }

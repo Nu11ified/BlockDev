@@ -19,6 +19,7 @@ export default {
       "src/renderer/index.html": "views/mainview/index.html",
       "dist/renderer/index.css": "views/mainview/index.css",
       "assets/logo.png": "views/mainview/logo.png",
+      "jre": "jre",
     },
     mac: {
       codesign: !!process.env.ELECTROBUN_DEVELOPER_ID,
@@ -29,7 +30,7 @@ export default {
       icon: "assets/logo.png",
     },
     win: {
-      icon: "assets/logo.png",
+      icon: "assets/logo.ico",
     },
   },
 } satisfies ElectrobunConfig;

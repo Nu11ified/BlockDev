@@ -20,7 +20,9 @@ import type {
   FileContent,
   ProjectEntry,
   ProjectTemplate,
+  ProjectLanguage,
   AutoDeployEvent,
+  PluginTimingData,
 } from "./types";
 
 // === Bun-side requests (main process handles these) ===
@@ -150,6 +152,7 @@ type BunRequests = {
       name: string;
       mcVersion: string;
       packageName?: string;
+      language?: ProjectLanguage;
     };
     response: { success: boolean; projectId?: string; error?: string };
   };
@@ -163,6 +166,19 @@ type BunRequests = {
   getProjects: {
     params: {};
     response: ProjectEntry[];
+  };
+  // --- Plugin monitoring (Phase 5) ---
+  getPluginTimings: {
+    params: { serverId: string };
+    response: PluginTimingData[];
+  };
+  startPluginMonitoring: {
+    params: { serverId: string };
+    response: { success: boolean };
+  };
+  stopPluginMonitoring: {
+    params: { serverId: string };
+    response: { success: boolean };
   };
   // --- CRUD operations ---
   addServer: {
@@ -203,6 +219,8 @@ type WebViewMessages = {
   buildOutput: { projectId: string; line: string };
   resourceStats: ServerResourceStats;
   autoDeployStatus: AutoDeployEvent;
+  javaSetupProgress: { stage: "downloading" | "extracting" | "ready" | "error"; message: string };
+  pluginTimingsUpdate: PluginTimingData[];
 };
 
 // === Combined RPC schema for Electrobun ===

@@ -88,6 +88,10 @@ jobs:
 
           rm "$CERT_FILE"
 
+      - name: Generate Windows icon
+        if: runner.os == 'Windows'
+        run: bun scripts/generate-ico.ts
+
       - name: Build CSS
         run: bun scripts/build-css.ts
 

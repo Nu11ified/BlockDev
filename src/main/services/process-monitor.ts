@@ -178,6 +178,25 @@ export class ProcessMonitor {
         // fall through
       }
     }
+    if (os === "win32") {
+      try {
+        // wmic returns WorkingSetSize in bytes
+        const result = Bun.spawnSync([
+          "wmic", "process", "where", `ProcessId=${pid}`,
+          "get", "WorkingSetSize", "/format:csv",
+        ]);
+        const output = new TextDecoder().decode(result.stdout).trim();
+        const lines = output.split("\n").filter((l) => l.trim());
+        if (lines.length >= 2) {
+          const values = lines[lines.length - 1].split(",");
+          const bytes = parseInt(values[values.length - 1].trim(), 10);
+          if (!isNaN(bytes)) return bytes / (1024 * 1024);
+        }
+      } catch {
+        // fall through
+      }
+      return 0;
+    }
     // macOS or fallback: use ps
     try {
       const result = Bun.spawnSync(["ps", "-o", "rss=", "-p", String(pid)]);
@@ -233,18 +252,40 @@ export class ProcessMonitor {
         // fall through
       }
     }
+    if (os === "win32") {
+      try {
+        // wmic returns KernelModeTime and UserModeTime in 100-nanosecond units
+        const result = Bun.spawnSync([
+          "wmic", "process", "where", `ProcessId=${pid}`,
+          "get", "KernelModeTime,UserModeTime", "/format:csv",
+        ]);
+        const output = new TextDecoder().decode(result.stdout).trim();
+        const lines = output.split("\n").filter((l) => l.trim());
+        if (lines.length >= 2) {
+          const values = lines[lines.length - 1].split(",");
+          // CSV format: Node,KernelModeTime,UserModeTime
+          const kernel = parseInt(values[values.length - 2].trim(), 10) || 0;
+          const user = parseInt(values[values.length - 1].trim(), 10) || 0;
+          // Convert 100ns units to Linux-like clock ticks (1 tick = 10ms = 10_000_000 ns)
+          return (kernel + user) / 100000;
+        }
+      } catch {
+        // fall through
+      }
+    }
     return 0;
   }
 
   private getCpuPercent(entry: MonitoredProcess, now: number): number {
     const os = platform();
 
-    if (os === "linux") {
+    if (os === "linux" || os === "win32") {
+      // Both Linux and Windows use delta-based CPU calculation via getCpuTime()
       const currentCpuTime = this.getCpuTime(entry.pid);
       const elapsedMs = now - entry.lastCpuCheck;
       if (elapsedMs <= 0) return 0;
 
-      const ticksPerSec = 100; // standard on most Linux systems
+      const ticksPerSec = 100; // Linux clock ticks; Windows getCpuTime is normalized to match
       const cpuDelta = currentCpuTime - entry.lastCpuTime;
       const cpuSeconds = cpuDelta / ticksPerSec;
       const percent = (cpuSeconds / (elapsedMs / 1000)) * 100;

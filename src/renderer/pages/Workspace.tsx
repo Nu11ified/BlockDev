@@ -4,6 +4,7 @@ import type { ConsoleMessage, RunningProcess, WorkspaceManifest } from "../../sh
 import { GlassNav, Button } from "../components";
 import { Console } from "../components/Console";
 import { DevToolsPanel } from "../components/DevToolsPanel";
+import { PluginTimingsPanel } from "../components/PluginTimingsPanel";
 import { ResourcePanel } from "../components/ResourcePanel";
 import { ProjectsPanel } from "../components/ProjectsPanel";
 import { FileExplorerPanel } from "../components/FileExplorerPanel";
@@ -13,7 +14,7 @@ import { StatusBar } from "../components/StatusBar";
 import { TabBar } from "../components/TabBar";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { AddServerDialog } from "../components/AddServerDialog";
-import { useRPC, onConsoleOutput, onServerStatus, onAutoDeployStatus } from "../hooks/useRPC";
+import { useRPC, onConsoleOutput, onServerStatus, onAutoDeployStatus, onJavaSetupProgress } from "../hooks/useRPC";
 
 interface WorkspaceProps {
   onBack: () => void;
@@ -32,6 +33,9 @@ export function Workspace({ onBack }: WorkspaceProps) {
   const [messages, setMessages] = useState<ConsoleMessage[]>([]);
   const [serverStatus, setServerStatus] = useState<ServerStatus>("stopped");
   const [autoDeployEnabled, setAutoDeployEnabled] = useState(false);
+
+  // Java setup state
+  const [javaSetup, setJavaSetup] = useState<{ stage: string; message: string } | null>(null);
 
   // Dialog state
   const [showAddServer, setShowAddServer] = useState(false);
@@ -101,6 +105,20 @@ export function Workspace({ onBack }: WorkspaceProps) {
     });
     return unsubscribe;
   }, [selectedServer]);
+
+  // Subscribe to Java setup progress
+  useEffect(() => {
+    const unsubscribe = onJavaSetupProgress((progress) => {
+      if (progress.stage === "ready" || progress.stage === "error") {
+        // Clear the overlay after a short delay so the user sees the final state
+        setJavaSetup(progress);
+        setTimeout(() => setJavaSetup(null), 2000);
+      } else {
+        setJavaSetup(progress);
+      }
+    });
+    return unsubscribe;
+  }, []);
 
   // Subscribe to auto-deploy status events
   useEffect(() => {
@@ -425,7 +443,10 @@ export function Workspace({ onBack }: WorkspaceProps) {
             <Console messages={messages} onCommand={handleCommand} onClear={handleClearConsole} />
           )}
           {activeTab === "Dev Tools" && selectedServer && (
-            <DevToolsPanel serverId={selectedServer} serverStatus={serverStatus} />
+            <div className="flex-1 flex flex-col gap-4 min-h-0 overflow-y-auto">
+              <DevToolsPanel serverId={selectedServer} serverStatus={serverStatus} />
+              <PluginTimingsPanel serverId={selectedServer} serverStatus={serverStatus} />
+            </div>
           )}
           {activeTab === "Projects" && (
             <>
@@ -516,6 +537,21 @@ export function Workspace({ onBack }: WorkspaceProps) {
           onConfirm={handleConfirmDeleteWorkspace}
           onCancel={() => setShowDeleteWorkspace(false)}
         />
+      )}
+
+      {/* Java setup loading overlay */}
+      {javaSetup && javaSetup.stage !== "ready" && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+          <div className="bg-[#0f0f0f] border border-border-subtle rounded-xl p-6 max-w-sm text-center">
+            {javaSetup.stage !== "error" && (
+              <div className="w-8 h-8 border-2 border-accent border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+            )}
+            <p className="text-sm font-medium text-text-primary mb-1">
+              {javaSetup.stage === "downloading" ? "Downloading Java Runtime" : javaSetup.stage === "extracting" ? "Installing Java Runtime" : "Java Setup Error"}
+            </p>
+            <p className="text-xs text-text-dim">{javaSetup.message}</p>
+          </div>
+        </div>
       )}
     </div>
   );
