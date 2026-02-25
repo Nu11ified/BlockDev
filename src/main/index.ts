@@ -5,7 +5,7 @@
 import { BrowserWindow, BrowserView, Utils, ApplicationMenu, PATHS } from "electrobun/bun";
 import { join, resolve } from "node:path";
 import { platform, homedir } from "node:os";
-import { mkdirSync, appendFileSync, promises as fsp } from "node:fs";
+import { mkdirSync, appendFileSync, existsSync, promises as fsp } from "node:fs";
 
 // ---------------------------------------------------------------------------
 // Path helper: expand leading ~/  to the user's home directory
@@ -1160,11 +1160,20 @@ const rpc = BrowserView.defineRPC<BlockDevRPC>({
 
       provisionRemoteAgent: async (params) => {
         try {
-          // In production builds PATHS.RESOURCES_FOLDER points to the app
-          // bundle Resources dir. In dev builds it may be undefined, so fall
-          // back to resolving relative to import.meta.dir.
-          const resourcesDir = PATHS.RESOURCES_FOLDER ?? join(import.meta.dir, "..", "..");
-          const agentBinaryPath = join(resourcesDir, "app", "agent", "blockdev-agent");
+          // Search for the agent binary in all possible locations.
+          // Electrobun copy destinations end up under RESOURCES_FOLDER/app/,
+          // but import.meta.dir varies between dev and production builds.
+          const candidates = [
+            PATHS.RESOURCES_FOLDER ? join(PATHS.RESOURCES_FOLDER, "app", "agent", "blockdev-agent") : "",
+            join(import.meta.dir, "app", "agent", "blockdev-agent"),
+            join(import.meta.dir, "..", "app", "agent", "blockdev-agent"),
+            join(import.meta.dir, "..", "..", "agent", "blockdev-agent"),
+            join(import.meta.dir, "agent", "blockdev-agent"),
+          ].filter(Boolean);
+          const agentBinaryPath = candidates.find((p) => existsSync(p));
+          if (!agentBinaryPath) {
+            throw new Error(`Agent binary not found. Searched:\n${candidates.join("\n")}\n\nRun: bash scripts/build-agent.sh`);
+          }
           const result = await sshProvisioner.provision(
             {
               host: params.host,

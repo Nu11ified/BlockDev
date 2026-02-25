@@ -61,6 +61,7 @@ export function CreateWorkspace({ onBack, onCreate }: CreateWorkspaceProps) {
   const [testingConnection, setTestingConnection] = useState(false);
   const [connectionTestResult, setConnectionTestResult] = useState<{ success: boolean; error?: string } | null>(null);
   const [provisionStage, setProvisionStage] = useState<string | null>(null);
+  const [provisionSteps, setProvisionSteps] = useState<string[]>([]);
 
   // Framework loading state
   const [frameworks, setFrameworks] = useState<FrameworkOption[]>([]);
@@ -74,6 +75,12 @@ export function CreateWorkspace({ onBack, onCreate }: CreateWorkspaceProps) {
   useEffect(() => {
     const unsubscribe = rpc.onProvisionProgress?.((data: { stage: string; message: string }) => {
       setProvisionStage(data.message);
+      setProvisionSteps((prev) => {
+        if (prev.length === 0 || prev[prev.length - 1] !== data.message) {
+          return [...prev, data.message];
+        }
+        return prev;
+      });
     });
     return () => unsubscribe?.();
   }, []);
@@ -170,6 +177,8 @@ export function CreateWorkspace({ onBack, onCreate }: CreateWorkspaceProps) {
       // Final step: create the workspace via RPC
       setCreating(true);
       setCreateError(null);
+      setProvisionStage(null);
+      setProvisionSteps([]);
 
       const selectedBuild = build;
 
@@ -677,10 +686,28 @@ export function CreateWorkspace({ onBack, onCreate }: CreateWorkspaceProps) {
               </div>
 
               {/* Provisioning progress */}
-              {creating && serverLocation === "remote" && provisionStage && (
-                <div className="px-4 py-2 rounded-xl bg-accent/5 border border-accent/20 text-accent text-sm flex items-center gap-2">
-                  <LuLoader className="animate-spin text-xs" />
-                  {provisionStage}
+              {creating && serverLocation === "remote" && provisionSteps.length > 0 && (
+                <div className="rounded-xl bg-bg-surface border border-border-subtle overflow-hidden">
+                  <div className="px-4 py-2.5 border-b border-border-subtle bg-accent/5">
+                    <p className="text-xs font-medium text-accent uppercase tracking-wide">Deploying to {sshHost}</p>
+                  </div>
+                  <div className="px-4 py-3 space-y-2">
+                    {provisionSteps.map((msg, i) => {
+                      const isLast = i === provisionSteps.length - 1;
+                      return (
+                        <div key={i} className="flex items-center gap-2.5 text-sm">
+                          {isLast ? (
+                            <LuLoader className="animate-spin text-accent shrink-0" size={14} />
+                          ) : (
+                            <LuCheck className="text-green-400 shrink-0" size={14} />
+                          )}
+                          <span className={isLast ? "text-text-primary" : "text-text-muted"}>
+                            {msg}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
 

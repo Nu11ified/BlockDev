@@ -2,9 +2,10 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 
-// Force clipboard shortcuts to work in Electrobun's WKWebView.
-// The system webview can swallow Cmd/Ctrl+C/V before the ApplicationMenu
-// or default browser handling kicks in, so we handle it explicitly.
+// Help clipboard shortcuts work in Electrobun's WKWebView.
+// Copy/cut/selectAll are handled via execCommand. Paste is NOT handled
+// here because execCommand("paste") triggers a WKWebView permission
+// prompt — paste is handled natively by the ApplicationMenu role.
 document.addEventListener("keydown", (e) => {
   const mod = e.metaKey || e.ctrlKey;
   if (!mod) return;
@@ -12,9 +13,6 @@ document.addEventListener("keydown", (e) => {
   switch (e.key) {
     case "c":
       document.execCommand("copy");
-      break;
-    case "v":
-      document.execCommand("paste");
       break;
     case "x":
       document.execCommand("cut");
