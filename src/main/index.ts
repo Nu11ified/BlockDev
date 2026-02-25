@@ -153,6 +153,7 @@ const rpc = BrowserView.defineRPC<BlockDevRPC>({
             jvmArgs: ["-Xmx2G", "-Xms1G"],
             port: 25565,
             path: serverDir,
+            location: { type: "local" } as const,
           };
 
           // Ensure the server directory exists before downloading into it
@@ -887,6 +888,7 @@ const rpc = BrowserView.defineRPC<BlockDevRPC>({
             jvmArgs: ["-Xmx2G", "-Xms1G"],
             port: 25565 + workspace.servers.length, // offset port to avoid conflicts
             path: serverDir,
+            location: { type: "local" } as const,
           };
 
           await provider.downloadServer(params.mcVersion, params.build, serverDir);

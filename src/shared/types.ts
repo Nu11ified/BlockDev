@@ -84,6 +84,18 @@ export interface WorkspaceManifest {
   deployments: DeploymentMapping[];
 }
 
+// === Server Location (local vs remote) ===
+export type ServerLocation =
+  | { type: "local" }
+  | {
+      type: "remote";
+      host: string;
+      agentPort: number;
+      token: string;
+      sshUser?: string;
+      sshKeyPath?: string;
+    };
+
 export interface ServerConfig {
   id: string;
   framework: string;
@@ -92,6 +104,7 @@ export interface ServerConfig {
   jvmArgs: string[];
   port: number;
   path: string;
+  location: ServerLocation;
 }
 
 export interface ProjectEntry {

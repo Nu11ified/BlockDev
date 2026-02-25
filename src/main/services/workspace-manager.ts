@@ -62,6 +62,13 @@ export class WorkspaceManager {
     const raw = await readFile(manifestPath, "utf-8");
     const manifest: WorkspaceManifest = JSON.parse(raw);
 
+    // Migrate workspaces that predate the remote server feature
+    for (const server of manifest.servers) {
+      if (!server.location) {
+        (server as any).location = { type: "local" };
+      }
+    }
+
     this.currentWorkspace = manifest;
     this.currentPath = dirPath;
 
