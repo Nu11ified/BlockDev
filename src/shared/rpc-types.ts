@@ -204,7 +204,7 @@ type BunRequests = {
   };
   // --- Remote server provisioning ---
   testSSHConnection: {
-    params: { host: string; user: string; keyPath?: string };
+    params: { host: string; user: string; keyPath?: string; password?: string };
     response: { success: boolean; error?: string };
   };
   provisionRemoteAgent: {
@@ -212,6 +212,7 @@ type BunRequests = {
       host: string;
       user: string;
       keyPath?: string;
+      password?: string;
       agentPort?: number;
     };
     response: { success: boolean; token?: string; agentPort?: number; error?: string };
