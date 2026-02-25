@@ -4,13 +4,13 @@
 
 import type { ServerInstance, RunningProcess, ConsoleMessage } from "../../shared/types";
 import type { FrameworkProvider } from "../plugins/plugin-api";
-import type { StatusCallback, ConsoleCallback, LineHook } from "./server-controller-interface";
+import type { IServerController, StatusCallback, ConsoleCallback, LineHook } from "./server-controller-interface";
 import type { AgentRequest, AgentEvent } from "../../shared/agent-protocol";
 
 type ConnectionStatus = "disconnected" | "connecting" | "connected" | "reconnecting";
 type ConnectionStatusCallback = (status: ConnectionStatus) => void;
 
-export class RemoteServerController {
+export class RemoteServerController implements IServerController {
   private ws: WebSocket | null = null;
   private connectionStatus: ConnectionStatus = "disconnected";
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -22,6 +22,8 @@ export class RemoteServerController {
   private statusCallback: StatusCallback | null = null;
   private lineHook: LineHook | null = null;
   private connectionStatusCallback: ConnectionStatusCallback | null = null;
+  private processStatsCallback: ((stats: { cpu: number; memory: number; tps: number | null }) => void) | null = null;
+  private setupProgressCallback: ((stage: string, percent: number, message?: string) => void) | null = null;
 
   // State
   private currentStatus: RunningProcess["status"] = "stopped";
@@ -44,37 +46,45 @@ export class RemoteServerController {
   }
 
   /** Open the WebSocket connection to the remote agent. */
-  connect(): void {
-    if (this.ws) return;
+  connect(): Promise<void> {
+    if (this.ws) return Promise.resolve();
 
     this.setConnectionStatus("connecting");
 
-    const url = `ws://${this.host}:${this.agentPort}/ws`;
-    this.ws = new WebSocket(url, {
-      headers: { Authorization: `Bearer ${this.token}` },
-    } as any);
+    return new Promise<void>((resolve, reject) => {
+      const url = `ws://${this.host}:${this.agentPort}/ws`;
+      this.ws = new WebSocket(url, {
+        headers: { Authorization: `Bearer ${this.token}` },
+      } as any);
 
-    this.ws.onopen = () => {
-      this.setConnectionStatus("connected");
-      this.reconnectDelay = 1000; // reset backoff
-      console.log(`Connected to remote agent at ${this.host}:${this.agentPort}`);
-    };
+      this.ws.onopen = () => {
+        this.setConnectionStatus("connected");
+        this.reconnectDelay = 1000;
+        console.log(`Connected to remote agent at ${this.host}:${this.agentPort}`);
+        resolve();
+      };
 
-    this.ws.onmessage = (event) => {
-      this.handleEvent(JSON.parse(String(event.data)));
-    };
+      this.ws.onmessage = (event) => {
+        try {
+          this.handleEvent(JSON.parse(String(event.data)));
+        } catch (err) {
+          console.error(`Failed to parse agent message from ${this.host}:`, err);
+        }
+      };
 
-    this.ws.onclose = () => {
-      this.ws = null;
-      if (this.connectionStatus !== "disconnected") {
-        this.setConnectionStatus("reconnecting");
-        this.scheduleReconnect();
-      }
-    };
+      this.ws.onclose = () => {
+        this.ws = null;
+        if (this.connectionStatus !== "disconnected") {
+          this.setConnectionStatus("reconnecting");
+          this.scheduleReconnect();
+        }
+      };
 
-    this.ws.onerror = (err) => {
-      console.error(`WebSocket error for ${this.host}:`, err);
-    };
+      this.ws.onerror = (err) => {
+        console.error(`WebSocket error for ${this.host}:`, err);
+        reject(err);
+      };
+    });
   }
 
   /** Close the connection without reconnecting. */
@@ -88,6 +98,11 @@ export class RemoteServerController {
       this.ws.close();
       this.ws = null;
     }
+    this.consoleCallback = null;
+    this.statusCallback = null;
+    this.lineHook = null;
+    this.processStatsCallback = null;
+    this.setupProgressCallback = null;
   }
 
   // --- IServerController-like methods ---
@@ -180,6 +195,14 @@ export class RemoteServerController {
     this.send({ type: "get-recent-console", lines });
   }
 
+  onProcessStats(cb: (stats: { cpu: number; memory: number; tps: number | null }) => void): void {
+    this.processStatsCallback = cb;
+  }
+
+  onSetupProgress(cb: (stage: string, percent: number, message?: string) => void): void {
+    this.setupProgressCallback = cb;
+  }
+
   // --- Private ---
 
   private send(request: AgentRequest): void {
@@ -208,11 +231,11 @@ export class RemoteServerController {
         break;
 
       case "process-stats":
-        // Forwarded via a separate callback if needed
+        this.processStatsCallback?.({ cpu: event.cpu, memory: event.memory, tps: event.tps });
         break;
 
       case "setup-progress":
-        // Forwarded to the renderer via the provisioning flow
+        this.setupProgressCallback?.(event.stage, event.percent, event.message);
         break;
 
       case "error":
@@ -253,7 +276,9 @@ export class RemoteServerController {
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       this.ws = null;
-      this.connect();
+      this.connect().catch((err) => {
+        console.error(`Reconnect failed for ${this.host}:`, err);
+      });
 
       // Exponential backoff
       this.reconnectDelay = Math.min(this.reconnectDelay * 2, this.maxReconnectDelay);

@@ -23,7 +23,7 @@ export type AgentEvent =
   | { type: "process-stats"; cpu: number; memory: number; tps: number | null }
   | { type: "setup-progress"; stage: "downloading-java" | "downloading-server" | "configuring" | "ready" | "error"; percent: number; message?: string }
   | { type: "error"; message: string; code?: string }
-  | { type: "heartbeat"; uptime: number; serverStatus: string }
+  | { type: "heartbeat"; uptime: number; serverStatus: "starting" | "running" | "stopping" | "stopped" | "error" }
   | { type: "recent-console"; lines: Array<{ line: string; level: string; timestamp: number }> }
   | { type: "request-ack"; requestType: string; success: boolean; error?: string };
 
