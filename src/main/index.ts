@@ -1058,6 +1058,12 @@ const rpc = BrowserView.defineRPC<BlockDevRPC>({
             return { success: false, error: "Services are still initializing" };
           }
 
+          // Disconnect remote controllers for this workspace
+          for (const [id, remote] of remoteControllers) {
+            remote.disconnect();
+          }
+          remoteControllers.clear();
+
           // Stop all running servers first
           fileWatcher.unwatchAll();
           processMonitor.stopAll();
@@ -1562,6 +1568,12 @@ async function shutdownGracefully(): Promise<void> {
   fileWatcher.unwatchAll();
   processMonitor.stopAll();
   pluginTimings.stopAll();
+
+  // Disconnect all remote controllers
+  for (const [id, remote] of remoteControllers) {
+    remote.disconnect();
+  }
+  remoteControllers.clear();
 
   try {
     await serverController.stopAll();
