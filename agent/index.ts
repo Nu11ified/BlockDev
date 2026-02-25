@@ -2,20 +2,40 @@
 // BlockDev Remote Agent — runs on a Linux VPS to manage a Minecraft server.
 // Compiled to a single binary via: bun build --compile agent/index.ts --outfile blockdev-agent
 
-import { mkdir, readFile, writeFile, copyFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readFile, writeFile, copyFile, chmod } from "node:fs/promises";
+import { join, basename, resolve as pathResolve } from "node:path";
 import { existsSync } from "node:fs";
 import { parseArgs } from "node:util";
 
 import type { AgentRequest, AgentEvent } from "../src/shared/agent-protocol";
 import { DEFAULT_AGENT_PORT, CONSOLE_BUFFER_SIZE } from "../src/shared/agent-protocol";
-import type { ConsoleMessage, ServerInstance, ServerConfig } from "../src/shared/types";
+import type { ConsoleMessage, ServerInstance, ServerConfig, RunningProcess } from "../src/shared/types";
 
 import { DownloadManager } from "../src/main/services/download-manager";
 import { JavaManager } from "../src/main/services/java-manager";
 import { ServerController } from "../src/main/services/server-controller";
 import { ProcessMonitor } from "../src/main/services/process-monitor";
 import { createPluginRegistry, loadBuiltinPlugins } from "../src/main/plugins/plugin-loader";
+
+// ---------------------------------------------------------------------------
+// Path sanitization helpers
+// ---------------------------------------------------------------------------
+
+function sanitizeFileName(name: string): string {
+  const clean = basename(name);
+  if (!clean || clean === "." || clean === "..") {
+    throw new Error(`Invalid file name: ${name}`);
+  }
+  return clean;
+}
+
+function assertWithinDir(dir: string, target: string): void {
+  const resolved = pathResolve(target);
+  const resolvedDir = pathResolve(dir);
+  if (!resolved.startsWith(resolvedDir + "/") && resolved !== resolvedDir) {
+    throw new Error("Path traversal detected");
+  }
+}
 
 // ---------------------------------------------------------------------------
 // CLI argument parsing
@@ -53,6 +73,7 @@ async function getOrCreateToken(): Promise<string> {
   }
 
   await writeFile(TOKEN_PATH, token, "utf-8");
+  await chmod(TOKEN_PATH, 0o600);
   return token;
 }
 
@@ -105,7 +126,7 @@ function onConsole(serverId: string, message: ConsoleMessage): void {
   broadcast({ type: "console", ...entry });
 }
 
-function onStatus(serverId: string, status: ServerInstance["framework"] extends string ? any : any): void {
+function onStatus(serverId: string, status: RunningProcess["status"]): void {
   broadcast({ type: "status", serverStatus: status, pid: undefined, players: undefined });
 }
 
@@ -140,6 +161,33 @@ async function handleMessage(ws: import("bun").ServerWebSocket<{ authenticated: 
   } catch {
     ws.send(JSON.stringify({ type: "error", message: "Invalid JSON" }));
     return;
+  }
+
+  // Validate required fields per request type
+  if (!request || typeof request !== "object" || typeof request.type !== "string") {
+    ws.send(JSON.stringify({ type: "error", message: "Invalid request: missing type" }));
+    return;
+  }
+
+  const { type } = request;
+  if (type === "send-command" && typeof (request as any).command !== "string") {
+    ws.send(JSON.stringify({ type: "error", message: "send-command requires a 'command' string" }));
+    return;
+  }
+  if (type === "upload-artifact" && (typeof (request as any).name !== "string" || typeof (request as any).data !== "string")) {
+    ws.send(JSON.stringify({ type: "error", message: "upload-artifact requires 'name' and 'data' strings" }));
+    return;
+  }
+  if (type === "deploy-artifact" && (typeof (request as any).name !== "string" || typeof (request as any).targetDir !== "string")) {
+    ws.send(JSON.stringify({ type: "error", message: "deploy-artifact requires 'name' and 'targetDir' strings" }));
+    return;
+  }
+  if (type === "setup-server") {
+    const r = request as any;
+    if (typeof r.framework !== "string" || typeof r.mcVersion !== "string" || typeof r.build !== "string" || typeof r.port !== "number") {
+      ws.send(JSON.stringify({ type: "error", message: "setup-server requires framework, mcVersion, build (strings) and port (number)" }));
+      return;
+    }
   }
 
   try {
@@ -241,18 +289,25 @@ async function handleMessage(ws: import("bun").ServerWebSocket<{ authenticated: 
       }
 
       case "upload-artifact": {
+        const safeName = sanitizeFileName(request.name);
+        const MAX_UPLOAD_SIZE = 500 * 1024 * 1024; // 500MB
+        const buffer = Buffer.from(request.data, "base64");
+        if (buffer.byteLength > MAX_UPLOAD_SIZE) {
+          throw new Error(`Upload too large: ${buffer.byteLength} bytes (max ${MAX_UPLOAD_SIZE})`);
+        }
         const artifactDir = join(DATA_DIR, "uploads");
         await mkdir(artifactDir, { recursive: true });
-        const buffer = Buffer.from(request.data, "base64");
-        await Bun.write(join(artifactDir, request.name), buffer);
+        await Bun.write(join(artifactDir, safeName), buffer);
         ws.send(JSON.stringify({ type: "request-ack", requestType: "upload-artifact", success: true }));
         break;
       }
 
       case "deploy-artifact": {
-        const sourcePath = join(DATA_DIR, "uploads", request.name);
-        if (!existsSync(sourcePath)) throw new Error(`Artifact not found: ${request.name}`);
-        const targetPath = join(SERVER_DIR, request.targetDir, request.name);
+        const safeName = sanitizeFileName(request.name);
+        const sourcePath = join(DATA_DIR, "uploads", safeName);
+        if (!existsSync(sourcePath)) throw new Error(`Artifact not found: ${safeName}`);
+        const targetPath = join(SERVER_DIR, request.targetDir, safeName);
+        assertWithinDir(SERVER_DIR, join(SERVER_DIR, request.targetDir));
         await mkdir(join(SERVER_DIR, request.targetDir), { recursive: true });
         await copyFile(sourcePath, targetPath);
         ws.send(JSON.stringify({ type: "request-ack", requestType: "deploy-artifact", success: true }));
@@ -281,7 +336,6 @@ async function handleMessage(ws: import("bun").ServerWebSocket<{ authenticated: 
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    ws.send(JSON.stringify({ type: "error", message }));
     ws.send(JSON.stringify({ type: "request-ack", requestType: request.type, success: false, error: message }));
   }
 }
@@ -294,7 +348,7 @@ async function main() {
   const token = await getOrCreateToken();
   console.log(`BlockDev Agent starting on port ${AGENT_PORT}`);
   console.log(`Data directory: ${DATA_DIR}`);
-  console.log(`Auth token: ${token}`);
+  console.log(`Auth token generated (stored at ${TOKEN_PATH})`);
 
   // Load framework providers
   await loadBuiltinPlugins(registry, { cachePath: downloadManager.getCacheDir() });
@@ -341,7 +395,9 @@ async function main() {
           ws.close(1008, "Not authenticated");
           return;
         }
-        handleMessage(ws, String(message));
+        handleMessage(ws, String(message)).catch((err) => {
+          console.error("Unhandled message error:", err);
+        });
       },
       close(ws) {
         clients.delete(ws);
