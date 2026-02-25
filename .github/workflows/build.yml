@@ -33,11 +33,9 @@ jobs:
           - os: ubuntu-latest
             targets: linux-x64
             artifact-name: blockdev-linux
-          # Windows disabled: Electrobun CLI tar extraction fails on Windows
-          # drive paths (D: interpreted as remote host). Upstream issue.
-          # - os: windows-latest
-          #   targets: win-x64
-          #   artifact-name: blockdev-windows
+          - os: windows-latest
+            targets: win-x64
+            artifact-name: blockdev-windows
 
     runs-on: ${{ matrix.os }}
     name: Build (${{ matrix.os }})
@@ -86,6 +84,16 @@ jobs:
           security list-keychains -d user -s "$KEYCHAIN_FILE" login.keychain-db
 
           rm "$CERT_FILE"
+
+      # On Windows, GNU tar from Git/MSYS2 interprets drive letters (D:) as
+      # remote hosts, breaking Electrobun's CLI extraction. Prioritize Windows'
+      # native bsdtar (System32) and set --force-local as a safety net.
+      - name: Fix tar for Windows drive paths
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          echo "C:\Windows\System32" >> "$GITHUB_PATH"
+          echo "TAR_OPTIONS=--force-local" >> "$GITHUB_ENV"
 
       - name: Generate Windows icon
         if: runner.os == 'Windows'
