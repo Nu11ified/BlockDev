@@ -58,6 +58,7 @@ export function CreateWorkspace({ onBack, onCreate }: CreateWorkspaceProps) {
   const [agentPort, setAgentPort] = useState(9847);
   const [testingConnection, setTestingConnection] = useState(false);
   const [connectionTestResult, setConnectionTestResult] = useState<{ success: boolean; error?: string } | null>(null);
+  const [provisionStage, setProvisionStage] = useState<string | null>(null);
 
   // Framework loading state
   const [frameworks, setFrameworks] = useState<FrameworkOption[]>([]);
@@ -66,6 +67,14 @@ export function CreateWorkspace({ onBack, onCreate }: CreateWorkspaceProps) {
   // Version loading state
   const [versions, setVersions] = useState<MinecraftVersion[]>([]);
   const [versionsLoading, setVersionsLoading] = useState(false);
+
+  // Subscribe to provision progress events
+  useEffect(() => {
+    const unsubscribe = rpc.onProvisionProgress?.((data: { stage: string; message: string }) => {
+      setProvisionStage(data.message);
+    });
+    return () => unsubscribe?.();
+  }, []);
 
   // Fetch frameworks on mount
   useEffect(() => {
@@ -123,7 +132,7 @@ export function CreateWorkspace({ onBack, onCreate }: CreateWorkspaceProps) {
 
   const canNext =
     (step === 0 && selectedFramework !== null) ||
-    (step === 1 && (serverLocation === "local" || (serverLocation === "remote" && sshHost))) ||
+    (step === 1 && (serverLocation === "local" || (serverLocation === "remote" && sshHost.trim() && sshUser.trim() && agentPort > 0 && agentPort <= 65535))) ||
     (step === 2 && selectedVersion !== null) ||
     (step === 3 && !creating);
 
@@ -180,7 +189,13 @@ export function CreateWorkspace({ onBack, onCreate }: CreateWorkspaceProps) {
             return;
           }
 
-          // Create workspace with remote location
+          if (!provResult.token || !provResult.agentPort) {
+            setCreateError("Provisioning succeeded but did not return connection details. Please try again.");
+            setCreating(false);
+            return;
+          }
+
+          // Now safe to use provResult.token and provResult.agentPort without !
           const result = await rpc.request("createWorkspace", {
             name: workspaceName || `${selectedFramework}-dev`,
             path: workspacePath,
@@ -190,8 +205,8 @@ export function CreateWorkspace({ onBack, onCreate }: CreateWorkspaceProps) {
             location: {
               type: "remote" as const,
               host: sshHost,
-              agentPort: provResult.agentPort!,
-              token: provResult.token!,
+              agentPort: provResult.agentPort,
+              token: provResult.token,
               sshUser,
               sshKeyPath: sshKeyPath || undefined,
             },
@@ -388,7 +403,7 @@ export function CreateWorkspace({ onBack, onCreate }: CreateWorkspaceProps) {
                 {/* Local/Remote toggle */}
                 <div className="flex gap-3">
                   <button
-                    onClick={() => setServerLocation("local")}
+                    onClick={() => { setServerLocation("local"); setConnectionTestResult(null); }}
                     className={`flex-1 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-300 cursor-pointer ${
                       serverLocation === "local"
                         ? "bg-accent text-black"
@@ -398,7 +413,7 @@ export function CreateWorkspace({ onBack, onCreate }: CreateWorkspaceProps) {
                     My Machine (Local)
                   </button>
                   <button
-                    onClick={() => setServerLocation("remote")}
+                    onClick={() => { setServerLocation("remote"); setConnectionTestResult(null); }}
                     className={`flex-1 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-300 cursor-pointer ${
                       serverLocation === "remote"
                         ? "bg-accent text-black"
@@ -413,8 +428,9 @@ export function CreateWorkspace({ onBack, onCreate }: CreateWorkspaceProps) {
                 {serverLocation === "remote" && (
                   <div className="flex flex-col gap-4 mt-2">
                     <div>
-                      <label className="text-xs text-text-dim uppercase tracking-wide">Host</label>
+                      <label htmlFor="ssh-host" className="text-xs text-text-dim uppercase tracking-wide">Host</label>
                       <input
+                        id="ssh-host"
                         type="text" value={sshHost} onChange={(e) => setSshHost(e.target.value)}
                         placeholder="play.example.com"
                         className="w-full mt-1 px-4 py-3 rounded-xl bg-card border border-border-subtle text-text-primary text-sm font-mono focus:outline-none focus:border-accent transition-colors"
@@ -422,23 +438,26 @@ export function CreateWorkspace({ onBack, onCreate }: CreateWorkspaceProps) {
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <label className="text-xs text-text-dim uppercase tracking-wide">SSH User</label>
+                        <label htmlFor="ssh-user" className="text-xs text-text-dim uppercase tracking-wide">SSH User</label>
                         <input
+                          id="ssh-user"
                           type="text" value={sshUser} onChange={(e) => setSshUser(e.target.value)}
                           className="w-full mt-1 px-4 py-3 rounded-xl bg-card border border-border-subtle text-text-primary text-sm font-mono focus:outline-none focus:border-accent transition-colors"
                         />
                       </div>
                       <div>
-                        <label className="text-xs text-text-dim uppercase tracking-wide">Agent Port</label>
+                        <label htmlFor="agent-port" className="text-xs text-text-dim uppercase tracking-wide">Agent Port</label>
                         <input
+                          id="agent-port"
                           type="number" value={agentPort} onChange={(e) => setAgentPort(parseInt(e.target.value) || 9847)}
                           className="w-full mt-1 px-4 py-3 rounded-xl bg-card border border-border-subtle text-text-primary text-sm font-mono focus:outline-none focus:border-accent transition-colors"
                         />
                       </div>
                     </div>
                     <div>
-                      <label className="text-xs text-text-dim uppercase tracking-wide">SSH Key Path</label>
+                      <label htmlFor="ssh-key-path" className="text-xs text-text-dim uppercase tracking-wide">SSH Key Path</label>
                       <input
+                        id="ssh-key-path"
                         type="text" value={sshKeyPath} onChange={(e) => setSshKeyPath(e.target.value)}
                         className="w-full mt-1 px-4 py-3 rounded-xl bg-card border border-border-subtle text-text-primary text-sm font-mono focus:outline-none focus:border-accent transition-colors"
                       />
@@ -610,6 +629,14 @@ export function CreateWorkspace({ onBack, onCreate }: CreateWorkspaceProps) {
                   </button>
                 </div>
               </div>
+
+              {/* Provisioning progress */}
+              {creating && serverLocation === "remote" && provisionStage && (
+                <div className="px-4 py-2 rounded-xl bg-accent/5 border border-accent/20 text-accent text-sm flex items-center gap-2">
+                  <LuLoader className="animate-spin text-xs" />
+                  {provisionStage}
+                </div>
+              )}
 
               {/* Error message */}
               {createError && (
