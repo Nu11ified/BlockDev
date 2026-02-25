@@ -1160,7 +1160,11 @@ const rpc = BrowserView.defineRPC<BlockDevRPC>({
 
       provisionRemoteAgent: async (params) => {
         try {
-          const agentBinaryPath = join(PATHS.RESOURCES_FOLDER, "app", "agent", "blockdev-agent");
+          // In production builds PATHS.RESOURCES_FOLDER points to the app
+          // bundle Resources dir. In dev builds it may be undefined, so fall
+          // back to resolving relative to import.meta.dir.
+          const resourcesDir = PATHS.RESOURCES_FOLDER ?? join(import.meta.dir, "..", "..");
+          const agentBinaryPath = join(resourcesDir, "app", "agent", "blockdev-agent");
           const result = await sshProvisioner.provision(
             {
               host: params.host,
