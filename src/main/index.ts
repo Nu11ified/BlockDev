@@ -2,7 +2,7 @@
 // Main process entry point. Creates the window first for immediate feedback,
 // then initializes services and loads plugins in the background.
 
-import { BrowserWindow, BrowserView, Utils, ApplicationMenu, PATHS } from "electrobun/bun";
+import Electrobun, { BrowserWindow, BrowserView, Utils, ApplicationMenu, PATHS } from "electrobun/bun";
 import { join, resolve } from "node:path";
 import { platform, homedir } from "node:os";
 import { mkdirSync, appendFileSync, existsSync, promises as fsp } from "node:fs";
@@ -1560,9 +1560,10 @@ try {
     rpc,
   });
 
-  // Set up application menu so copy/paste/cut/undo/redo work on macOS.
-  // Note: ApplicationMenu is not supported on Linux; the renderer-side
-  // keyboard handler (see renderer index.ts) covers all platforms.
+  // Application menu for macOS. Paste is handled as a custom action
+  // because WKWebView doesn't forward the native paste: selector to
+  // web content. We read the clipboard from the main process and inject
+  // the text into the webview via executeJavascript.
   ApplicationMenu.setApplicationMenu([
     {
       label: "BlockDev",
@@ -1578,16 +1579,44 @@ try {
         { role: "undo" },
         { role: "redo" },
         { type: "separator" },
-        { role: "cut" },
-        { role: "copy" },
-        { role: "paste" },
-        { role: "pasteAndMatchStyle" },
-        { role: "delete" },
+        { label: "Cut", action: "edit-cut", accelerator: "x" },
+        { label: "Copy", action: "edit-copy", accelerator: "c" },
+        { label: "Paste", action: "edit-paste", accelerator: "v" },
         { type: "separator" },
-        { role: "selectAll" },
+        { label: "Select All", action: "edit-select-all", accelerator: "a" },
       ],
     },
   ]);
+
+  // Handle Edit menu actions by injecting clipboard operations into the
+  // webview. This is the only reliable way to make paste work in WKWebView.
+  Electrobun.events.on("application-menu-clicked", (e: { data: { action: string } }) => {
+    try {
+      switch (e.data.action) {
+        case "edit-copy":
+          win.webview.executeJavascript("document.execCommand('copy')");
+          break;
+        case "edit-cut":
+          win.webview.executeJavascript("document.execCommand('cut')");
+          break;
+        case "edit-paste": {
+          const text = Utils.clipboardReadText();
+          if (text) {
+            const escaped = JSON.stringify(text);
+            win.webview.executeJavascript(
+              `document.execCommand('insertText', false, ${escaped})`
+            );
+          }
+          break;
+        }
+        case "edit-select-all":
+          win.webview.executeJavascript("document.execCommand('selectAll')");
+          break;
+      }
+    } catch (err) {
+      console.error("Menu action failed:", err);
+    }
+  });
 
   crashLog("Window created successfully");
   console.log("BlockDev window created");

@@ -2,11 +2,13 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 
-// Help clipboard shortcuts work in Electrobun's WKWebView.
-// Copy/cut/selectAll are handled via execCommand. Paste is NOT handled
-// here because execCommand("paste") triggers a WKWebView permission
-// prompt — paste is handled natively by the ApplicationMenu role.
-document.addEventListener("keydown", (e) => {
+// Clipboard shortcuts for Electrobun's WKWebView.
+// All four operations (copy/cut/paste/selectAll) are driven from the
+// main process via ApplicationMenu actions + executeJavascript. This
+// renderer handler is a fallback for Linux/Windows where ApplicationMenu
+// is not supported. Paste uses navigator.clipboard.readText() since
+// execCommand("paste") triggers a permission prompt in WebKit.
+document.addEventListener("keydown", async (e) => {
   const mod = e.metaKey || e.ctrlKey;
   if (!mod) return;
 
@@ -16,6 +18,15 @@ document.addEventListener("keydown", (e) => {
       break;
     case "x":
       document.execCommand("cut");
+      break;
+    case "v":
+      e.preventDefault();
+      try {
+        const text = await navigator.clipboard.readText();
+        document.execCommand("insertText", false, text);
+      } catch {
+        // Clipboard API unavailable — main process handler covers macOS
+      }
       break;
     case "a":
       e.preventDefault();
