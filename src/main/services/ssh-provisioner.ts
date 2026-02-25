@@ -71,9 +71,11 @@ export class SSHProvisioner {
     onProgress?.("setup", "Creating remote directory...");
     await this.sshExec(config, `mkdir -p ${remoteDir}`);
 
-    // Step 2: Kill any existing agent (best-effort)
+    // Step 2: Kill any existing agent using PID file (safe, targeted)
     onProgress?.("setup", "Stopping any existing agent...");
-    await this.sshExec(config, `pkill -f blockdev-agent || true`).catch(() => {});
+    await this.sshExec(config,
+      `if [ -f ${remoteDir}/agent.pid ]; then kill $(cat ${remoteDir}/agent.pid) 2>/dev/null || true; rm -f ${remoteDir}/agent.pid; fi; sleep 1`
+    ).catch(() => {});
 
     // Step 3: Upload agent binary
     onProgress?.("upload", "Uploading agent binary...");
@@ -88,27 +90,34 @@ export class SSHProvisioner {
     // Remove old token so fresh one is generated
     await this.sshExec(config, `rm -f ${remoteDir}/auth.token`).catch(() => {});
 
-    // Start agent in background, wait for it to write the token
+    // Start agent in background, write PID file for safe cleanup later
     await this.sshExec(
       config,
-      `nohup ${remoteBinary} --port ${agentPort} --data-dir ${remoteDir} > ${remoteDir}/agent.log 2>&1 &`
+      `nohup ${remoteBinary} --port ${agentPort} --data-dir ${remoteDir} > ${remoteDir}/agent.log 2>&1 & echo $! > ${remoteDir}/agent.pid`
     );
 
-    // Wait briefly for the agent to start and generate the token
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-
-    // Step 6: Read the token
+    // Poll for the token file with retries (agent may take a moment to start)
     onProgress?.("connecting", "Reading auth token...");
-    const token = await this.sshExec(config, `cat ${remoteDir}/auth.token`);
+    let token = "";
+    const maxAttempts = 10;
+    const pollInterval = 1000; // 1 second between polls
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, pollInterval));
+      try {
+        token = (await this.sshExec(config, `cat ${remoteDir}/auth.token 2>/dev/null`)).trim();
+        if (token) break;
+      } catch {
+        // Token file not yet written, keep trying
+      }
+    }
 
-    if (!token.trim()) {
-      // Check agent log for errors
+    if (!token) {
       const log = await this.sshExec(config, `tail -20 ${remoteDir}/agent.log`).catch(() => "");
-      throw new Error(`Agent failed to start. Log:\n${log}`);
+      throw new Error(`Agent failed to start after ${maxAttempts}s. Log:\n${log}`);
     }
 
     onProgress?.("done", "Agent deployed successfully");
-    return { token: token.trim(), agentPort };
+    return { token, agentPort };
   }
 
   /** Run a command over SSH, return stdout. */
