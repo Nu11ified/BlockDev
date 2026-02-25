@@ -8,14 +8,20 @@ export interface SSHConfig {
   host: string;
   user: string;
   keyPath?: string;
+  password?: string;
   agentPort?: number;
 }
 
 export type ProvisionProgress = (stage: string, message: string) => void;
 
 export class SSHProvisioner {
+  /** Base SSH options: auto-accept host keys, never prompt interactively. */
   private buildSshArgs(config: SSHConfig): string[] {
-    const args = ["-o", "ConnectTimeout=10", "-o", "StrictHostKeyChecking=accept-new"];
+    const args = [
+      "-o", "ConnectTimeout=10",
+      "-o", "StrictHostKeyChecking=no",
+      "-o", "UserKnownHostsFile=/dev/null",
+    ];
     if (config.keyPath) {
       args.push("-i", config.keyPath);
     }
@@ -24,19 +30,39 @@ export class SSHProvisioner {
   }
 
   private buildScpArgs(config: SSHConfig): string[] {
-    const args = ["-o", "ConnectTimeout=10", "-o", "StrictHostKeyChecking=accept-new"];
+    const args = [
+      "-o", "ConnectTimeout=10",
+      "-o", "StrictHostKeyChecking=no",
+      "-o", "UserKnownHostsFile=/dev/null",
+    ];
     if (config.keyPath) {
       args.push("-i", config.keyPath);
     }
     return args;
   }
 
+  /** When password auth is used, prefix the command with sshpass -e and set SSHPASS env var. */
+  private buildCommandPrefix(config: SSHConfig): string[] {
+    if (config.password) {
+      return ["sshpass", "-e"];
+    }
+    return [];
+  }
+
+  private getSpawnEnv(config: SSHConfig): Record<string, string> | undefined {
+    if (config.password) {
+      return { ...process.env, SSHPASS: config.password } as Record<string, string>;
+    }
+    return undefined;
+  }
+
   /** Test SSH connectivity. Returns true if we can connect and run a command. */
   async testConnection(config: SSHConfig): Promise<{ success: boolean; error?: string }> {
     try {
-      const proc = Bun.spawn(["ssh", ...this.buildSshArgs(config), "echo blockdev-ok"], {
+      const proc = Bun.spawn([...this.buildCommandPrefix(config), "ssh", ...this.buildSshArgs(config), "echo blockdev-ok"], {
         stdout: "pipe",
         stderr: "pipe",
+        env: this.getSpawnEnv(config),
       });
 
       const stdout = await new Response(proc.stdout).text();
@@ -122,9 +148,10 @@ export class SSHProvisioner {
 
   /** Run a command over SSH, return stdout. */
   private async sshExec(config: SSHConfig, command: string): Promise<string> {
-    const proc = Bun.spawn(["ssh", ...this.buildSshArgs(config), command], {
+    const proc = Bun.spawn([...this.buildCommandPrefix(config), "ssh", ...this.buildSshArgs(config), command], {
       stdout: "pipe",
       stderr: "pipe",
+      env: this.getSpawnEnv(config),
     });
 
     const stdout = await new Response(proc.stdout).text();
@@ -141,8 +168,8 @@ export class SSHProvisioner {
   /** Copy a local file to the remote host via SCP. */
   private async scpUpload(config: SSHConfig, localPath: string, remotePath: string): Promise<void> {
     const proc = Bun.spawn(
-      ["scp", ...this.buildScpArgs(config), localPath, `${config.user}@${config.host}:${remotePath}`],
-      { stdout: "pipe", stderr: "pipe" },
+      [...this.buildCommandPrefix(config), "scp", ...this.buildScpArgs(config), localPath, `${config.user}@${config.host}:${remotePath}`],
+      { stdout: "pipe", stderr: "pipe", env: this.getSpawnEnv(config) },
     );
 
     const exitCode = await proc.exited;

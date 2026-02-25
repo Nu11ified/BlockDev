@@ -2,7 +2,7 @@
 // Main process entry point. Creates the window first for immediate feedback,
 // then initializes services and loads plugins in the background.
 
-import { BrowserWindow, BrowserView, Utils } from "electrobun/bun";
+import { BrowserWindow, BrowserView, Utils, ApplicationMenu } from "electrobun/bun";
 import { join, resolve } from "node:path";
 import { platform, homedir } from "node:os";
 import { mkdirSync, appendFileSync, promises as fsp } from "node:fs";
@@ -1151,6 +1151,7 @@ const rpc = BrowserView.defineRPC<BlockDevRPC>({
             host: params.host,
             user: params.user,
             keyPath: params.keyPath,
+            password: params.password,
           });
         } catch (err) {
           return { success: false, error: err instanceof Error ? err.message : String(err) };
@@ -1165,6 +1166,7 @@ const rpc = BrowserView.defineRPC<BlockDevRPC>({
               host: params.host,
               user: params.user,
               keyPath: params.keyPath,
+              password: params.password,
               agentPort: params.agentPort,
             },
             agentBinaryPath,
@@ -1552,6 +1554,33 @@ try {
     },
     rpc,
   });
+
+  // Set up application menu so copy/paste/cut/undo/redo work in the webview
+  ApplicationMenu.setApplicationMenu([
+    {
+      label: "BlockDev",
+      submenu: [
+        { role: "about" },
+        { type: "divider" },
+        { role: "quit" },
+      ],
+    },
+    {
+      label: "Edit",
+      submenu: [
+        { role: "undo" },
+        { role: "redo" },
+        { type: "divider" },
+        { role: "cut" },
+        { role: "copy" },
+        { role: "paste" },
+        { role: "pasteAndMatchStyle" },
+        { role: "delete" },
+        { type: "divider" },
+        { role: "selectAll" },
+      ],
+    },
+  ]);
 
   crashLog("Window created successfully");
   console.log("BlockDev window created");
