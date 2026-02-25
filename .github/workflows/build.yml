@@ -86,14 +86,12 @@ jobs:
           rm "$CERT_FILE"
 
       # On Windows, GNU tar from Git/MSYS2 interprets drive letters (D:) as
-      # remote hosts, breaking Electrobun's CLI extraction. Prioritize Windows'
-      # native bsdtar (System32) and set --force-local as a safety net.
+      # remote hosts, breaking Electrobun's CLI extraction. --force-local
+      # tells GNU tar to treat all archive paths as local files.
       - name: Fix tar for Windows drive paths
         if: runner.os == 'Windows'
-        shell: bash
-        run: |
-          echo "C:\Windows\System32" >> "$GITHUB_PATH"
-          echo "TAR_OPTIONS=--force-local" >> "$GITHUB_ENV"
+        shell: pwsh
+        run: echo "TAR_OPTIONS=--force-local" >> $env:GITHUB_ENV
 
       - name: Generate Windows icon
         if: runner.os == 'Windows'
