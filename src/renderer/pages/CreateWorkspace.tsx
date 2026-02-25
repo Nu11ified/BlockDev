@@ -178,9 +178,6 @@ export function CreateWorkspace({ onBack, onCreate }: CreateWorkspaceProps) {
             user: sshUser,
             keyPath: sshKeyPath || undefined,
             agentPort,
-            framework: selectedFramework!,
-            mcVersion: selectedVersion!,
-            build: selectedBuild,
           });
 
           if (!provResult.success) {

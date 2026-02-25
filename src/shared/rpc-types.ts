@@ -213,9 +213,6 @@ type BunRequests = {
       user: string;
       keyPath?: string;
       agentPort?: number;
-      framework: string;
-      mcVersion: string;
-      build: string;
     };
     response: { success: boolean; token?: string; agentPort?: number; error?: string };
   };
