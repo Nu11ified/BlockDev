@@ -51,6 +51,13 @@ export class SSHProvisioner {
 
   /** Verify sshpass is installed when password auth is needed. */
   private async checkSshpass(): Promise<void> {
+    if (process.platform === "win32") {
+      throw new Error(
+        "Password-based SSH authentication is not supported on Windows. " +
+        "Please use SSH key authentication instead."
+      );
+    }
+
     const proc = Bun.spawn(["which", "sshpass"], { stdout: "pipe", stderr: "pipe" });
     const exitCode = await proc.exited;
     if (exitCode !== 0) {

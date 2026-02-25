@@ -150,10 +150,10 @@ export function CreateWorkspace({ onBack, onCreate }: CreateWorkspaceProps) {
     setConnectionTestResult(null);
     try {
       const result = await rpc.request("testSSHConnection", {
-        host: sshHost,
-        user: sshUser,
-        keyPath: sshAuthMode === "key" ? (sshKeyPath || undefined) : undefined,
-        password: sshAuthMode === "password" ? sshPassword : undefined,
+        host: sshHost.trim(),
+        user: sshUser.trim(),
+        keyPath: sshAuthMode === "key" ? (sshKeyPath.trim() || undefined) : undefined,
+        password: sshAuthMode === "password" ? (sshPassword || undefined) : undefined,
       });
       setConnectionTestResult(result);
     } catch (err) {
@@ -177,10 +177,10 @@ export function CreateWorkspace({ onBack, onCreate }: CreateWorkspaceProps) {
         try {
           // Provision the agent first
           const provResult = await rpc.request("provisionRemoteAgent", {
-            host: sshHost,
-            user: sshUser,
-            keyPath: sshAuthMode === "key" ? (sshKeyPath || undefined) : undefined,
-            password: sshAuthMode === "password" ? sshPassword : undefined,
+            host: sshHost.trim(),
+            user: sshUser.trim(),
+            keyPath: sshAuthMode === "key" ? (sshKeyPath.trim() || undefined) : undefined,
+            password: sshAuthMode === "password" ? (sshPassword || undefined) : undefined,
             agentPort,
           });
 
@@ -205,12 +205,12 @@ export function CreateWorkspace({ onBack, onCreate }: CreateWorkspaceProps) {
             build: selectedBuild,
             location: {
               type: "remote" as const,
-              host: sshHost,
+              host: sshHost.trim(),
               agentPort: provResult.agentPort,
               token: provResult.token,
-              sshUser,
-              sshKeyPath: sshAuthMode === "key" ? (sshKeyPath || undefined) : undefined,
-              sshPassword: sshAuthMode === "password" ? sshPassword : undefined,
+              sshUser: sshUser.trim(),
+              sshKeyPath: sshAuthMode === "key" ? (sshKeyPath.trim() || undefined) : undefined,
+              sshPassword: sshAuthMode === "password" ? (sshPassword || undefined) : undefined,
             },
           });
 

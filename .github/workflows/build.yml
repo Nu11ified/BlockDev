@@ -33,9 +33,11 @@ jobs:
           - os: ubuntu-latest
             targets: linux-x64
             artifact-name: blockdev-linux
-          - os: windows-latest
-            targets: win-x64
-            artifact-name: blockdev-windows
+          # Windows disabled: Electrobun CLI tar extraction fails on Windows
+          # drive paths (D: interpreted as remote host). Upstream issue.
+          # - os: windows-latest
+          #   targets: win-x64
+          #   artifact-name: blockdev-windows
 
     runs-on: ${{ matrix.os }}
     name: Build (${{ matrix.os }})
