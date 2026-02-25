@@ -52,9 +52,11 @@ export function CreateWorkspace({ onBack, onCreate }: CreateWorkspaceProps) {
 
   // Location state
   const [serverLocation, setServerLocation] = useState<"local" | "remote">("local");
+  const [sshAuthMode, setSshAuthMode] = useState<"key" | "password">("key");
   const [sshHost, setSshHost] = useState("");
   const [sshUser, setSshUser] = useState("root");
   const [sshKeyPath, setSshKeyPath] = useState("~/.ssh/id_ed25519");
+  const [sshPassword, setSshPassword] = useState("");
   const [agentPort, setAgentPort] = useState(9847);
   const [testingConnection, setTestingConnection] = useState(false);
   const [connectionTestResult, setConnectionTestResult] = useState<{ success: boolean; error?: string } | null>(null);
@@ -132,7 +134,7 @@ export function CreateWorkspace({ onBack, onCreate }: CreateWorkspaceProps) {
 
   const canNext =
     (step === 0 && selectedFramework !== null) ||
-    (step === 1 && (serverLocation === "local" || (serverLocation === "remote" && sshHost.trim() && sshUser.trim() && agentPort > 0 && agentPort <= 65535))) ||
+    (step === 1 && (serverLocation === "local" || (serverLocation === "remote" && sshHost.trim() && sshUser.trim() && agentPort > 0 && agentPort <= 65535 && (sshAuthMode === "key" ? sshKeyPath.trim() : sshPassword.trim())))) ||
     (step === 2 && selectedVersion !== null) ||
     (step === 3 && !creating);
 
@@ -148,9 +150,10 @@ export function CreateWorkspace({ onBack, onCreate }: CreateWorkspaceProps) {
     setConnectionTestResult(null);
     try {
       const result = await rpc.request("testSSHConnection", {
-        host: sshHost,
-        user: sshUser,
-        keyPath: sshKeyPath || undefined,
+        host: sshHost.trim(),
+        user: sshUser.trim(),
+        keyPath: sshAuthMode === "key" ? (sshKeyPath.trim() || undefined) : undefined,
+        password: sshAuthMode === "password" ? (sshPassword || undefined) : undefined,
       });
       setConnectionTestResult(result);
     } catch (err) {
@@ -174,9 +177,10 @@ export function CreateWorkspace({ onBack, onCreate }: CreateWorkspaceProps) {
         try {
           // Provision the agent first
           const provResult = await rpc.request("provisionRemoteAgent", {
-            host: sshHost,
-            user: sshUser,
-            keyPath: sshKeyPath || undefined,
+            host: sshHost.trim(),
+            user: sshUser.trim(),
+            keyPath: sshAuthMode === "key" ? (sshKeyPath.trim() || undefined) : undefined,
+            password: sshAuthMode === "password" ? (sshPassword || undefined) : undefined,
             agentPort,
           });
 
@@ -201,11 +205,12 @@ export function CreateWorkspace({ onBack, onCreate }: CreateWorkspaceProps) {
             build: selectedBuild,
             location: {
               type: "remote" as const,
-              host: sshHost,
+              host: sshHost.trim(),
               agentPort: provResult.agentPort,
               token: provResult.token,
-              sshUser,
-              sshKeyPath: sshKeyPath || undefined,
+              sshUser: sshUser.trim(),
+              sshKeyPath: sshAuthMode === "key" ? (sshKeyPath.trim() || undefined) : undefined,
+              sshPassword: sshAuthMode === "password" ? (sshPassword || undefined) : undefined,
             },
           });
 
@@ -451,14 +456,58 @@ export function CreateWorkspace({ onBack, onCreate }: CreateWorkspaceProps) {
                         />
                       </div>
                     </div>
+
+                    {/* Auth mode toggle */}
                     <div>
-                      <label htmlFor="ssh-key-path" className="text-xs text-text-dim uppercase tracking-wide">SSH Key Path</label>
-                      <input
-                        id="ssh-key-path"
-                        type="text" value={sshKeyPath} onChange={(e) => setSshKeyPath(e.target.value)}
-                        className="w-full mt-1 px-4 py-3 rounded-xl bg-card border border-border-subtle text-text-primary text-sm font-mono focus:outline-none focus:border-accent transition-colors"
-                      />
+                      <label className="text-xs text-text-dim uppercase tracking-wide">Authentication</label>
+                      <div className="flex gap-3 mt-1">
+                        <button
+                          onClick={() => { setSshAuthMode("key"); setConnectionTestResult(null); }}
+                          className={`flex-1 px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-300 cursor-pointer ${
+                            sshAuthMode === "key"
+                              ? "bg-accent text-black"
+                              : "bg-card border border-border-subtle text-text-muted hover:text-text-primary"
+                          }`}
+                        >
+                          SSH Key
+                        </button>
+                        <button
+                          onClick={() => { setSshAuthMode("password"); setConnectionTestResult(null); }}
+                          className={`flex-1 px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-300 cursor-pointer ${
+                            sshAuthMode === "password"
+                              ? "bg-accent text-black"
+                              : "bg-card border border-border-subtle text-text-muted hover:text-text-primary"
+                          }`}
+                        >
+                          Password
+                        </button>
+                      </div>
                     </div>
+
+                    {/* SSH Key Path (shown for key auth) */}
+                    {sshAuthMode === "key" && (
+                      <div>
+                        <label htmlFor="ssh-key-path" className="text-xs text-text-dim uppercase tracking-wide">SSH Key Path</label>
+                        <input
+                          id="ssh-key-path"
+                          type="text" value={sshKeyPath} onChange={(e) => setSshKeyPath(e.target.value)}
+                          className="w-full mt-1 px-4 py-3 rounded-xl bg-card border border-border-subtle text-text-primary text-sm font-mono focus:outline-none focus:border-accent transition-colors"
+                        />
+                      </div>
+                    )}
+
+                    {/* Password (shown for password auth) */}
+                    {sshAuthMode === "password" && (
+                      <div>
+                        <label htmlFor="ssh-password" className="text-xs text-text-dim uppercase tracking-wide">Password</label>
+                        <input
+                          id="ssh-password"
+                          type="password" value={sshPassword} onChange={(e) => setSshPassword(e.target.value)}
+                          placeholder="Enter SSH password"
+                          className="w-full mt-1 px-4 py-3 rounded-xl bg-card border border-border-subtle text-text-primary text-sm font-mono focus:outline-none focus:border-accent transition-colors"
+                        />
+                      </div>
+                    )}
 
                     {/* Test Connection button */}
                     <button

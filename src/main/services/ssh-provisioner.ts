@@ -1,21 +1,47 @@
 // src/main/services/ssh-provisioner.ts
 // Handles deploying the blockdev-agent binary to a remote VPS via SSH/SCP.
 
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
+import { homedir } from "node:os";
 import { DEFAULT_AGENT_PORT } from "../../shared/agent-protocol";
+
+// Dedicated known_hosts file so BlockDev doesn't pollute ~/.ssh/known_hosts
+// but still detects changed host keys (MITM protection).
+const BLOCKDEV_KNOWN_HOSTS = join(homedir(), ".blockdev", "known_hosts");
 
 export interface SSHConfig {
   host: string;
   user: string;
   keyPath?: string;
+  password?: string;
   agentPort?: number;
 }
 
 export type ProvisionProgress = (stage: string, message: string) => void;
 
 export class SSHProvisioner {
+  constructor() {
+    // Ensure the directory for our known_hosts file exists
+    mkdirSync(join(homedir(), ".blockdev"), { recursive: true });
+  }
+
+  /**
+   * Base SSH options: accept-new auto-accepts first-time host keys without
+   * prompting, but still rejects changed keys (MITM protection). Uses a
+   * dedicated known_hosts file so we don't pollute ~/.ssh/known_hosts.
+   */
   private buildSshArgs(config: SSHConfig): string[] {
-    const args = ["-o", "ConnectTimeout=10", "-o", "StrictHostKeyChecking=accept-new"];
+    const args = [
+      "-o", "ConnectTimeout=10",
+      "-o", "StrictHostKeyChecking=accept-new",
+      "-o", `UserKnownHostsFile=${BLOCKDEV_KNOWN_HOSTS}`,
+    ];
+    // BatchMode prevents all interactive prompts (good for key auth) but
+    // must be off for password auth since sshpass needs the password prompt.
+    if (!config.password) {
+      args.push("-o", "BatchMode=yes");
+    }
     if (config.keyPath) {
       args.push("-i", config.keyPath);
     }
@@ -24,19 +50,63 @@ export class SSHProvisioner {
   }
 
   private buildScpArgs(config: SSHConfig): string[] {
-    const args = ["-o", "ConnectTimeout=10", "-o", "StrictHostKeyChecking=accept-new"];
+    const args = [
+      "-o", "ConnectTimeout=10",
+      "-o", "StrictHostKeyChecking=accept-new",
+      "-o", `UserKnownHostsFile=${BLOCKDEV_KNOWN_HOSTS}`,
+    ];
+    if (!config.password) {
+      args.push("-o", "BatchMode=yes");
+    }
     if (config.keyPath) {
       args.push("-i", config.keyPath);
     }
     return args;
   }
 
+  /** When password auth is used, prefix the command with sshpass -e and set SSHPASS env var. */
+  private buildCommandPrefix(config: SSHConfig): string[] {
+    if (config.password) {
+      return ["sshpass", "-e"];
+    }
+    return [];
+  }
+
+  /** Verify sshpass is installed when password auth is needed. */
+  private async checkSshpass(): Promise<void> {
+    if (process.platform === "win32") {
+      throw new Error(
+        "Password-based SSH authentication is not supported on Windows. " +
+        "Please use SSH key authentication instead."
+      );
+    }
+
+    const proc = Bun.spawn(["which", "sshpass"], { stdout: "pipe", stderr: "pipe" });
+    const exitCode = await proc.exited;
+    if (exitCode !== 0) {
+      throw new Error(
+        "sshpass is required for password authentication but was not found. " +
+        "Install it with: sudo apt install sshpass (Debian/Ubuntu), brew install sshpass (macOS), or sudo yum install sshpass (RHEL/CentOS)."
+      );
+    }
+  }
+
+  private getSpawnEnv(config: SSHConfig): Record<string, string> | undefined {
+    if (config.password) {
+      return { ...process.env, SSHPASS: config.password } as Record<string, string>;
+    }
+    return undefined;
+  }
+
   /** Test SSH connectivity. Returns true if we can connect and run a command. */
   async testConnection(config: SSHConfig): Promise<{ success: boolean; error?: string }> {
     try {
-      const proc = Bun.spawn(["ssh", ...this.buildSshArgs(config), "echo blockdev-ok"], {
+      if (config.password) await this.checkSshpass();
+
+      const proc = Bun.spawn([...this.buildCommandPrefix(config), "ssh", ...this.buildSshArgs(config), "echo blockdev-ok"], {
         stdout: "pipe",
         stderr: "pipe",
+        env: this.getSpawnEnv(config),
       });
 
       const stdout = await new Response(proc.stdout).text();
@@ -59,6 +129,8 @@ export class SSHProvisioner {
     agentBinaryPath: string,
     onProgress?: ProvisionProgress,
   ): Promise<{ token: string; agentPort: number }> {
+    if (config.password) await this.checkSshpass();
+
     const agentPort = config.agentPort ?? DEFAULT_AGENT_PORT;
     const remoteDir = "~/.blockdev-agent";
     const remoteBinary = `${remoteDir}/blockdev-agent`;
@@ -122,9 +194,10 @@ export class SSHProvisioner {
 
   /** Run a command over SSH, return stdout. */
   private async sshExec(config: SSHConfig, command: string): Promise<string> {
-    const proc = Bun.spawn(["ssh", ...this.buildSshArgs(config), command], {
+    const proc = Bun.spawn([...this.buildCommandPrefix(config), "ssh", ...this.buildSshArgs(config), command], {
       stdout: "pipe",
       stderr: "pipe",
+      env: this.getSpawnEnv(config),
     });
 
     const stdout = await new Response(proc.stdout).text();
@@ -141,8 +214,8 @@ export class SSHProvisioner {
   /** Copy a local file to the remote host via SCP. */
   private async scpUpload(config: SSHConfig, localPath: string, remotePath: string): Promise<void> {
     const proc = Bun.spawn(
-      ["scp", ...this.buildScpArgs(config), localPath, `${config.user}@${config.host}:${remotePath}`],
-      { stdout: "pipe", stderr: "pipe" },
+      [...this.buildCommandPrefix(config), "scp", ...this.buildScpArgs(config), localPath, `${config.user}@${config.host}:${remotePath}`],
+      { stdout: "pipe", stderr: "pipe", env: this.getSpawnEnv(config) },
     );
 
     const exitCode = await proc.exited;

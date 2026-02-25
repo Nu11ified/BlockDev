@@ -85,6 +85,14 @@ jobs:
 
           rm "$CERT_FILE"
 
+      # On Windows, GNU tar from Git/MSYS2 interprets drive letters (D:) as
+      # remote hosts, breaking Electrobun's CLI extraction. --force-local
+      # tells GNU tar to treat all archive paths as local files.
+      - name: Fix tar for Windows drive paths
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: echo "TAR_OPTIONS=--force-local" >> $env:GITHUB_ENV
+
       - name: Generate Windows icon
         if: runner.os == 'Windows'
         run: bun scripts/generate-ico.ts
@@ -99,7 +107,22 @@ jobs:
           ELECTROBUN_APPLEID: ${{ secrets.ELECTROBUN_APPLEID }}
           ELECTROBUN_APPLEIDPASS: ${{ secrets.ELECTROBUN_APPLEIDPASS }}
           ELECTROBUN_TEAMID: ${{ secrets.ELECTROBUN_TEAMID }}
-        run: bunx electrobun build --env=stable --targets=$BUILD_TARGETS
+        shell: bash
+        run: |
+          max_attempts=3
+          for attempt in $(seq 1 $max_attempts); do
+            echo "Build attempt $attempt of $max_attempts..."
+            if bunx electrobun build --env=stable --targets="$BUILD_TARGETS"; then
+              echo "Build succeeded on attempt $attempt"
+              exit 0
+            fi
+            if [ $attempt -lt $max_attempts ]; then
+              echo "Build failed, retrying in 10s..."
+              sleep 10
+            fi
+          done
+          echo "Build failed after $max_attempts attempts"
+          exit 1
 
       # Electrobun outputs distributable files to artifacts/ with names like:
       #   stable-macos-arm64-BlockDev.dmg

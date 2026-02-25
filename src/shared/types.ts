@@ -94,6 +94,7 @@ export type ServerLocation =
       token: string;
       sshUser?: string;
       sshKeyPath?: string;
+      sshPassword?: string;
     };
 
 export interface ServerConfig {
