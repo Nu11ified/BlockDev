@@ -10,6 +10,9 @@ const copyEntries: Record<string, string> = {
 if (existsSync("jre")) {
   copyEntries["jre"] = "jre";
 }
+if (existsSync("agent/blockdev-agent")) {
+  copyEntries["agent/blockdev-agent"] = "agent/blockdev-agent";
+}
 
 export default {
   app: {

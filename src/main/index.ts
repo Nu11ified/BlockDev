@@ -1555,13 +1555,15 @@ try {
     rpc,
   });
 
-  // Set up application menu so copy/paste/cut/undo/redo work in the webview
+  // Set up application menu so copy/paste/cut/undo/redo work on macOS.
+  // Note: ApplicationMenu is not supported on Linux; the renderer-side
+  // keyboard handler (see renderer index.ts) covers all platforms.
   ApplicationMenu.setApplicationMenu([
     {
       label: "BlockDev",
       submenu: [
         { role: "about" },
-        { type: "divider" },
+        { type: "separator" },
         { role: "quit" },
       ],
     },
@@ -1570,13 +1572,13 @@ try {
       submenu: [
         { role: "undo" },
         { role: "redo" },
-        { type: "divider" },
+        { type: "separator" },
         { role: "cut" },
         { role: "copy" },
         { role: "paste" },
         { role: "pasteAndMatchStyle" },
         { role: "delete" },
-        { type: "divider" },
+        { type: "separator" },
         { role: "selectAll" },
       ],
     },
