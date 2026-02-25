@@ -28,6 +28,8 @@ type ResourceStatsListener = (stats: ServerResourceStats) => void;
 type AutoDeployStatusListener = (event: AutoDeployEvent) => void;
 type JavaSetupProgressListener = (progress: { stage: "downloading" | "extracting" | "ready" | "error"; message: string }) => void;
 type PluginTimingsListener = (data: PluginTimingData[]) => void;
+type RemoteConnectionStatusListener = (event: { serverId: string; status: "disconnected" | "connecting" | "connected" | "reconnecting" }) => void;
+type ProvisionProgressListener = (event: { stage: string; message: string }) => void;
 
 // --- Listener registries ---
 
@@ -41,6 +43,8 @@ const listeners = {
   autoDeployStatus: new Set<AutoDeployStatusListener>(),
   javaSetupProgress: new Set<JavaSetupProgressListener>(),
   pluginTimings: new Set<PluginTimingsListener>(),
+  remoteConnectionStatus: new Set<RemoteConnectionStatusListener>(),
+  provisionProgress: new Set<ProvisionProgressListener>(),
 };
 
 // --- Module-level RPC singleton ---
@@ -75,6 +79,12 @@ const rpc = Electroview.defineRPC<BlockDevRPC>({
       },
       pluginTimingsUpdate: (data) => {
         listeners.pluginTimings.forEach((fn) => fn(data));
+      },
+      remoteConnectionStatus: (event) => {
+        listeners.remoteConnectionStatus.forEach((fn) => fn(event));
+      },
+      provisionProgress: (event) => {
+        listeners.provisionProgress.forEach((fn) => fn(event));
       },
     },
   },
@@ -153,5 +163,19 @@ export function onPluginTimings(listener: PluginTimingsListener): () => void {
   listeners.pluginTimings.add(listener);
   return () => {
     listeners.pluginTimings.delete(listener);
+  };
+}
+
+export function onRemoteConnectionStatus(listener: RemoteConnectionStatusListener): () => void {
+  listeners.remoteConnectionStatus.add(listener);
+  return () => {
+    listeners.remoteConnectionStatus.delete(listener);
+  };
+}
+
+export function onProvisionProgress(listener: ProvisionProgressListener): () => void {
+  listeners.provisionProgress.add(listener);
+  return () => {
+    listeners.provisionProgress.delete(listener);
   };
 }

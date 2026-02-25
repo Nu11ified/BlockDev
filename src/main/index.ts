@@ -37,6 +37,9 @@ import { ResourceManager } from "./services/resource-manager";
 import { createPluginRegistry, loadBuiltinPlugins } from "./plugins/plugin-loader";
 import { scaffoldProject } from "./services/project-scaffolder";
 import { PluginTimingsService } from "./services/plugin-timings";
+import { SSHProvisioner } from "./services/ssh-provisioner";
+import { RemoteServerController } from "./services/remote-server-controller";
+import type { ServerLocation } from "../shared/types";
 
 // ---------------------------------------------------------------------------
 // Crash logging — writes to ~/.blockdev/crash.log so errors survive app exit
@@ -82,6 +85,8 @@ let processMonitor: ProcessMonitor;
 let pluginTimings: PluginTimingsService;
 let resourceManager: ResourceManager;
 let registry: ReturnType<typeof createPluginRegistry>;
+let sshProvisioner: SSHProvisioner;
+const remoteControllers = new Map<string, RemoteServerController>();
 let servicesReady = false;
 
 // ---------------------------------------------------------------------------
@@ -120,6 +125,25 @@ function resolveServer(serverId: string): ServerInstance {
 }
 
 // ---------------------------------------------------------------------------
+// Helper: determine server location (local vs remote) from workspace config
+// ---------------------------------------------------------------------------
+
+function getServerLocation(serverId: string): ServerLocation {
+  const workspace = workspaceManager.getCurrent();
+  if (!workspace) return { type: "local" };
+  const server = workspace.servers.find((s) => s.id === serverId);
+  return server?.location ?? { type: "local" };
+}
+
+function isRemoteServer(serverId: string): boolean {
+  return getServerLocation(serverId).type === "remote";
+}
+
+function getRemoteController(serverId: string): RemoteServerController | undefined {
+  return remoteControllers.get(serverId);
+}
+
+// ---------------------------------------------------------------------------
 // Build the RPC instance using Electrobun's BrowserView.defineRPC
 // ---------------------------------------------------------------------------
 
@@ -136,6 +160,7 @@ const rpc = BrowserView.defineRPC<BlockDevRPC>({
 
           const { name, path: rawPath, framework, mcVersion, build } = params;
           const path = resolvePath(rawPath);
+          const location: ServerLocation = params.location ?? { type: "local" as const };
 
           const provider = registry.get(framework);
           if (!provider) {
@@ -153,14 +178,29 @@ const rpc = BrowserView.defineRPC<BlockDevRPC>({
             jvmArgs: ["-Xmx2G", "-Xms1G"],
             port: 25565,
             path: serverDir,
+            location,
           };
 
-          // Ensure the server directory exists before downloading into it
-          await fsp.mkdir(serverDir, { recursive: true });
+          if (location.type === "local") {
+            // Ensure the server directory exists before downloading into it
+            await fsp.mkdir(serverDir, { recursive: true });
 
-          // Download the server jar into serverDir, then set up server files
-          await provider.downloadServer(mcVersion, build, serverDir);
-          await provider.setupServer(serverConfig);
+            // Download the server jar into serverDir, then set up server files
+            await provider.downloadServer(mcVersion, build, serverDir);
+            await provider.setupServer(serverConfig);
+          } else {
+            // Remote server: agent handles download/setup
+            const remote = new RemoteServerController(location.host, location.agentPort, location.token);
+            remote.onConnectionStatus((status) => {
+              try {
+                rpc.send("remoteConnectionStatus", { serverId, status });
+              } catch {}
+            });
+            await remote.connect();
+            remoteControllers.set(serverId, remote);
+            await remote.setupServer(framework, mcVersion, build, ["-Xmx2G", "-Xms1G"], 25565);
+          }
+
           await workspaceManager.createWorkspace(name, path, serverConfig);
 
           return { success: true };
@@ -175,7 +215,32 @@ const rpc = BrowserView.defineRPC<BlockDevRPC>({
           if (!servicesReady) {
             return { manifest: null, error: "Services are still initializing" };
           }
+
+          // Disconnect any existing remote controllers from the previous workspace
+          for (const [id, remote] of remoteControllers) {
+            remote.disconnect();
+          }
+          remoteControllers.clear();
+
           const manifest = await workspaceManager.openWorkspace(params.path);
+
+          // Connect to any remote servers
+          if (manifest) {
+            for (const server of manifest.servers) {
+              if (server.location?.type === "remote") {
+                const loc = server.location;
+                const remote = new RemoteServerController(loc.host, loc.agentPort, loc.token);
+                remote.onConnectionStatus((status) => {
+                  try {
+                    rpc.send("remoteConnectionStatus", { serverId: server.id, status });
+                  } catch {}
+                });
+                await remote.connect();
+                remoteControllers.set(server.id, remote);
+              }
+            }
+          }
+
           return { manifest };
         } catch (err: unknown) {
           const message = err instanceof Error ? err.message : String(err);
@@ -255,6 +320,23 @@ const rpc = BrowserView.defineRPC<BlockDevRPC>({
           if (!servicesReady) {
             return { success: false, error: "Services are still initializing" };
           }
+
+          // Check if this is a remote server
+          const location = getServerLocation(params.serverId);
+          if (location.type === "remote") {
+            const remote = getRemoteController(params.serverId);
+            if (!remote) {
+              return { success: false, error: "Remote agent not connected" };
+            }
+            const instance = resolveServer(params.serverId);
+            const provider = registry.get(instance.framework);
+            if (!provider) {
+              return { success: false, error: `Unknown framework: ${instance.framework}` };
+            }
+            await remote.start(instance, provider, onConsole, onStatus, onLineHook);
+            return { success: true };
+          }
+
           const instance = resolveServer(params.serverId);
           const provider = registry.get(instance.framework);
           if (!provider) {
@@ -306,6 +388,14 @@ const rpc = BrowserView.defineRPC<BlockDevRPC>({
           if (!servicesReady) {
             return { success: false, error: "Services are still initializing" };
           }
+
+          if (isRemoteServer(params.serverId)) {
+            const remote = getRemoteController(params.serverId);
+            if (!remote) return { success: false, error: "Remote agent not connected" };
+            await remote.stop(params.serverId);
+            return { success: true };
+          }
+
           processMonitor.stopMonitoring(params.serverId);
           await serverController.stop(params.serverId);
           return { success: true };
@@ -320,6 +410,14 @@ const rpc = BrowserView.defineRPC<BlockDevRPC>({
           if (!servicesReady) {
             return { success: false, error: "Services are still initializing" };
           }
+
+          if (isRemoteServer(params.serverId)) {
+            const remote = getRemoteController(params.serverId);
+            if (!remote) return { success: false, error: "Remote agent not connected" };
+            await remote.restart(params.serverId, onConsole, onStatus, onLineHook);
+            return { success: true };
+          }
+
           processMonitor.stopMonitoring(params.serverId);
           await serverController.restart(params.serverId, onConsole, onStatus, onLineHook);
 
@@ -352,6 +450,13 @@ const rpc = BrowserView.defineRPC<BlockDevRPC>({
       getServerStatus: async (params) => {
         try {
           if (!servicesReady) return null;
+
+          if (isRemoteServer(params.serverId)) {
+            const remote = getRemoteController(params.serverId);
+            if (!remote) return null;
+            return remote.getStatus(params.serverId);
+          }
+
           return serverController.getStatus(params.serverId);
         } catch {
           return null;
@@ -361,6 +466,14 @@ const rpc = BrowserView.defineRPC<BlockDevRPC>({
       sendServerCommand: async (params) => {
         try {
           if (!servicesReady) return { success: false };
+
+          if (isRemoteServer(params.serverId)) {
+            const remote = getRemoteController(params.serverId);
+            if (!remote) return { success: false, error: "Remote agent not connected" };
+            await remote.sendCommand(params.serverId, params.command);
+            return { success: true };
+          }
+
           await serverController.sendCommand(params.serverId, params.command);
           return { success: true };
         } catch {
@@ -489,8 +602,26 @@ const rpc = BrowserView.defineRPC<BlockDevRPC>({
           if (project.type === "script") {
             const projectDir = join(workspacePath, project.path);
             const scriptsSourceDir = join(projectDir, "server_scripts");
-            const scriptsTargetDir = join(instance.path, "kubejs", "server_scripts");
 
+            // Remote server: upload scripts over WebSocket
+            if (isRemoteServer(params.serverId)) {
+              const remote = getRemoteController(params.serverId);
+              if (!remote) {
+                return { success: false, error: "Remote agent not connected" };
+              }
+              const files = await fsp.readdir(scriptsSourceDir).catch(() => [] as string[]);
+              for (const file of files) {
+                if (file.endsWith(".js") || file.endsWith(".ts")) {
+                  const content = await fsp.readFile(join(scriptsSourceDir, file));
+                  await remote.uploadArtifact(file, Buffer.from(content));
+                  await remote.deployArtifact(file, "kubejs/server_scripts");
+                }
+              }
+              return { success: true };
+            }
+
+            // Local: copy files directly
+            const scriptsTargetDir = join(instance.path, "kubejs", "server_scripts");
             await fsp.mkdir(scriptsTargetDir, { recursive: true });
             const files = await fsp.readdir(scriptsSourceDir).catch(() => [] as string[]);
             for (const file of files) {
@@ -508,6 +639,20 @@ const rpc = BrowserView.defineRPC<BlockDevRPC>({
           }
 
           const artifactPath = join(workspacePath, project.path, project.artifactPath);
+
+          // Remote server: upload artifact over WebSocket instead of local copy
+          if (isRemoteServer(params.serverId)) {
+            const remote = getRemoteController(params.serverId);
+            if (!remote) {
+              return { success: false, error: "Remote agent not connected" };
+            }
+            const artifactData = await Bun.file(artifactPath).arrayBuffer();
+            const fileName = artifactPath.split("/").pop() ?? "plugin.jar";
+            await remote.uploadArtifact(fileName, Buffer.from(artifactData));
+            await remote.deployArtifact(fileName, "plugins");
+            return { success: true };
+          }
+
           const artifact: BuildResult = {
             success: true,
             artifactPath,
@@ -537,7 +682,13 @@ const rpc = BrowserView.defineRPC<BlockDevRPC>({
 
           const reloadCmd = provider.getReloadCommand();
           if (reloadCmd) {
-            await serverController.sendCommand(params.serverId, reloadCmd);
+            if (isRemoteServer(params.serverId)) {
+              const remote = getRemoteController(params.serverId);
+              if (!remote) return { success: false, method: "none" };
+              await remote.sendCommand(params.serverId, reloadCmd);
+            } else {
+              await serverController.sendCommand(params.serverId, reloadCmd);
+            }
             return { success: true, method: "command" };
           }
 
@@ -648,7 +799,12 @@ const rpc = BrowserView.defineRPC<BlockDevRPC>({
           pluginTimings.startMonitoring(
             params.serverId,
             async (serverId, command) => {
-              await serverController.sendCommand(serverId, command);
+              if (isRemoteServer(serverId)) {
+                const remote = getRemoteController(serverId);
+                if (remote) await remote.sendCommand(serverId, command);
+              } else {
+                await serverController.sendCommand(serverId, command);
+              }
             },
             (timings) => {
               try {
@@ -710,6 +866,7 @@ const rpc = BrowserView.defineRPC<BlockDevRPC>({
       listResourcePacks: async (params) => {
         try {
           if (!servicesReady) return [];
+          if (isRemoteServer(params.serverId)) return []; // Resource packs not supported for remote servers
           const instance = resolveServer(params.serverId);
           return resourceManager.listResourcePacks(instance.path);
         } catch {
@@ -720,6 +877,7 @@ const rpc = BrowserView.defineRPC<BlockDevRPC>({
       createResourcePack: async (params) => {
         try {
           if (!servicesReady) return { success: false, error: "Services not ready" };
+          if (isRemoteServer(params.serverId)) return { success: false, error: "Resource packs are not supported for remote servers" };
           const instance = resolveServer(params.serverId);
           const path = resourceManager.createResourcePack(
             instance.path,
@@ -737,6 +895,7 @@ const rpc = BrowserView.defineRPC<BlockDevRPC>({
       copyResourcePackToServer: async (params) => {
         try {
           if (!servicesReady) return { success: false, error: "Services not ready" };
+          if (isRemoteServer(params.serverId)) return { success: false, error: "Resource packs are not supported for remote servers" };
           const instance = resolveServer(params.serverId);
           resourceManager.copyToServer(params.packPath, instance.path);
           return { success: true };
@@ -887,6 +1046,7 @@ const rpc = BrowserView.defineRPC<BlockDevRPC>({
             jvmArgs: ["-Xmx2G", "-Xms1G"],
             port: 25565 + workspace.servers.length, // offset port to avoid conflicts
             path: serverDir,
+            location: { type: "local" } as const,
           };
 
           await provider.downloadServer(params.mcVersion, params.build, serverDir);
@@ -906,7 +1066,14 @@ const rpc = BrowserView.defineRPC<BlockDevRPC>({
             return { success: false, error: "Services are still initializing" };
           }
 
-          // Stop the server if it's running
+          // Disconnect remote controller if it exists
+          const remote = remoteControllers.get(params.serverId);
+          if (remote) {
+            remote.disconnect();
+            remoteControllers.delete(params.serverId);
+          }
+
+          // Stop the local server if it's running
           const status = serverController.getStatus(params.serverId);
           if (status && (status.status === "running" || status.status === "starting")) {
             processMonitor.stopMonitoring(params.serverId);
@@ -944,6 +1111,12 @@ const rpc = BrowserView.defineRPC<BlockDevRPC>({
             return { success: false, error: "Services are still initializing" };
           }
 
+          // Disconnect remote controllers for this workspace
+          for (const [id, remote] of remoteControllers) {
+            remote.disconnect();
+          }
+          remoteControllers.clear();
+
           // Stop all running servers first
           fileWatcher.unwatchAll();
           processMonitor.stopAll();
@@ -968,6 +1141,48 @@ const rpc = BrowserView.defineRPC<BlockDevRPC>({
           const message = err instanceof Error ? err.message : String(err);
           return { success: false, error: message };
         }
+      },
+
+      // --- Remote server provisioning ---
+
+      testSSHConnection: async (params) => {
+        try {
+          return await sshProvisioner.testConnection({
+            host: params.host,
+            user: params.user,
+            keyPath: params.keyPath,
+          });
+        } catch (err) {
+          return { success: false, error: err instanceof Error ? err.message : String(err) };
+        }
+      },
+
+      provisionRemoteAgent: async (params) => {
+        try {
+          const agentBinaryPath = join(import.meta.dir, "..", "..", "agent", "blockdev-agent");
+          const result = await sshProvisioner.provision(
+            {
+              host: params.host,
+              user: params.user,
+              keyPath: params.keyPath,
+              agentPort: params.agentPort,
+            },
+            agentBinaryPath,
+            (stage, message) => {
+              try {
+                rpc.send("provisionProgress", { stage, message });
+              } catch {}
+            },
+          );
+          return { success: true, token: result.token, agentPort: result.agentPort };
+        } catch (err) {
+          return { success: false, error: err instanceof Error ? err.message : String(err) };
+        }
+      },
+
+      getRemoteConnectionStatus: async (params) => {
+        const remote = getRemoteController(params.serverId);
+        return { status: remote?.getConnectionStatus() ?? "disconnected" };
       },
     },
 
@@ -1122,6 +1337,11 @@ async function runAutoDeployPipeline(
   const provider = registry.get(framework);
   if (!provider) return;
 
+  // Detect remote servers — if the target is remote, we upload over WebSocket
+  const location = getServerLocation(serverId);
+  const isRemote = location.type === "remote";
+  const remote = isRemote ? getRemoteController(serverId) : undefined;
+
   // Find deployments linked to this server
   const deployments = workspace.deployments.filter((d) => d.server === serverId);
   if (deployments.length === 0) return;
@@ -1154,7 +1374,35 @@ async function runAutoDeployPipeline(
     sendStatus("watching", "File change detected, starting pipeline...");
 
     if (project.type === "script") {
-      // --- KubeJS script project: copy files directly ---
+      // --- KubeJS script project ---
+
+      // Remote server: upload scripts over WebSocket
+      if (isRemote && remote) {
+        sendStatus("deploying", "Uploading scripts to remote server...");
+        try {
+          const scriptsSourceDir = join(projectDir, "server_scripts");
+          // Upload script files to remote
+          const files = await fsp.readdir(scriptsSourceDir).catch(() => [] as string[]);
+          for (const file of files) {
+            if (file.endsWith(".js") || file.endsWith(".ts")) {
+              const content = await fsp.readFile(join(scriptsSourceDir, file));
+              await remote.uploadArtifact(file, Buffer.from(content));
+              await remote.deployArtifact(file, "kubejs/server_scripts");
+            }
+          }
+          // Reload on remote
+          if (remote.isRunning(serverId)) {
+            sendStatus("reloading", "Reloading KubeJS scripts...");
+            await remote.sendCommand(serverId, "/kubejs reload server_scripts");
+          }
+          sendStatus("done", "Scripts deployed to remote server");
+        } catch (err) {
+          sendStatus("error", `Remote deploy failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+        continue;
+      }
+
+      // --- Local: copy files directly ---
       sendStatus("deploying", "Copying scripts to server...");
       try {
         const serverDir = join(workspacePath, "servers", serverId);
@@ -1226,8 +1474,36 @@ async function runAutoDeployPipeline(
         }
 
         // Deploy artifact
-        sendStatus("deploying", "Copying artifact to server...");
         const artifactPath = join(projectDir, project.artifactPath);
+
+        // Remote server: upload artifact over WebSocket
+        if (isRemote && remote) {
+          sendStatus("deploying", "Uploading artifact to remote server...");
+          const content = await fsp.readFile(artifactPath);
+          const name = project.artifactPath.split("/").pop()!;
+          await remote.uploadArtifact(name, Buffer.from(content));
+
+          const deployment = workspace.deployments.find(
+            (d) => d.project === project.id && d.server === serverId,
+          );
+          await remote.deployArtifact(name, deployment?.targetDir ?? "plugins");
+
+          if (remote.isRunning(serverId)) {
+            const reloadCmd = provider.getReloadCommand();
+            if (reloadCmd) {
+              sendStatus("reloading", `Sending reload command: ${reloadCmd}`);
+              await remote.sendCommand(serverId, reloadCmd);
+            } else {
+              sendStatus("reloading", "Restarting remote server...");
+              await remote.restart(serverId, onConsole, onStatus, onLineHook);
+            }
+          }
+          sendStatus("done", "Build & deploy to remote server successful");
+          continue;
+        }
+
+        // Local server: copy artifact directly
+        sendStatus("deploying", "Copying artifact to server...");
         const instance = resolveServer(serverId);
         const buildResult: BuildResult = {
           success: true,
@@ -1312,6 +1588,7 @@ try {
   pluginTimings = new PluginTimingsService();
   resourceManager = new ResourceManager();
   registry = createPluginRegistry();
+  sshProvisioner = new SSHProvisioner();
 
   crashLog("Loading plugins...");
   await loadBuiltinPlugins(registry, { cachePath: downloadManager.getCacheDir() });
@@ -1344,6 +1621,12 @@ async function shutdownGracefully(): Promise<void> {
   fileWatcher.unwatchAll();
   processMonitor.stopAll();
   pluginTimings.stopAll();
+
+  // Disconnect all remote controllers
+  for (const [id, remote] of remoteControllers) {
+    remote.disconnect();
+  }
+  remoteControllers.clear();
 
   try {
     await serverController.stopAll();

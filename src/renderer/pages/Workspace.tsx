@@ -14,7 +14,7 @@ import { StatusBar } from "../components/StatusBar";
 import { TabBar } from "../components/TabBar";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { AddServerDialog } from "../components/AddServerDialog";
-import { useRPC, onConsoleOutput, onServerStatus, onAutoDeployStatus, onJavaSetupProgress } from "../hooks/useRPC";
+import { useRPC, onConsoleOutput, onServerStatus, onAutoDeployStatus, onJavaSetupProgress, onRemoteConnectionStatus } from "../hooks/useRPC";
 
 interface WorkspaceProps {
   onBack: () => void;
@@ -33,6 +33,11 @@ export function Workspace({ onBack }: WorkspaceProps) {
   const [messages, setMessages] = useState<ConsoleMessage[]>([]);
   const [serverStatus, setServerStatus] = useState<ServerStatus>("stopped");
   const [autoDeployEnabled, setAutoDeployEnabled] = useState(false);
+
+  // Remote connection status state
+  const [remoteConnectionStatus, setRemoteConnectionStatus] = useState<
+    Record<string, "disconnected" | "connecting" | "connected" | "reconnecting">
+  >({});
 
   // Java setup state
   const [javaSetup, setJavaSetup] = useState<{ stage: string; message: string } | null>(null);
@@ -132,6 +137,14 @@ export function Workspace({ onBack }: WorkspaceProps) {
           text: `[${event.stage}] ${event.message}`,
         },
       ]);
+    });
+    return unsubscribe;
+  }, []);
+
+  // Subscribe to remote connection status events
+  useEffect(() => {
+    const unsubscribe = onRemoteConnectionStatus((event) => {
+      setRemoteConnectionStatus((prev) => ({ ...prev, [event.serverId]: event.status }));
     });
     return unsubscribe;
   }, []);
@@ -421,8 +434,22 @@ export function Workspace({ onBack }: WorkspaceProps) {
             Back
           </Button>
           <div className="h-4 w-px bg-border-subtle" />
-          <h2 className="text-sm font-medium text-text-primary truncate flex-1">
+          <h2 className="text-sm font-medium text-text-primary truncate flex-1 flex items-center">
             {serverDisplayName}
+            {currentServer?.location?.type === "remote" && (
+              <span
+                className={`w-2 h-2 rounded-full inline-block ml-2 shrink-0 ${
+                  remoteConnectionStatus[selectedServer!] === "connected"
+                    ? "bg-green-400"
+                    : remoteConnectionStatus[selectedServer!] === "reconnecting"
+                      ? "bg-yellow-400 animate-pulse"
+                      : remoteConnectionStatus[selectedServer!] === "connecting"
+                        ? "bg-yellow-400 animate-pulse"
+                        : "bg-red-400"
+                }`}
+                title={`Remote: ${remoteConnectionStatus[selectedServer!] || "disconnected"}`}
+              />
+            )}
           </h2>
           <button
             onClick={() => setShowDeleteWorkspace(true)}

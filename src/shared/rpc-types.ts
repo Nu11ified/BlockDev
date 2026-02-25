@@ -35,6 +35,7 @@ type BunRequests = {
       framework: string;
       mcVersion: string;
       build: string;
+      location?: import("./types").ServerLocation;
     };
     response: { success: boolean; error?: string };
   };
@@ -201,6 +202,24 @@ type BunRequests = {
     params: { path: string };
     response: { success: boolean; error?: string };
   };
+  // --- Remote server provisioning ---
+  testSSHConnection: {
+    params: { host: string; user: string; keyPath?: string };
+    response: { success: boolean; error?: string };
+  };
+  provisionRemoteAgent: {
+    params: {
+      host: string;
+      user: string;
+      keyPath?: string;
+      agentPort?: number;
+    };
+    response: { success: boolean; token?: string; agentPort?: number; error?: string };
+  };
+  getRemoteConnectionStatus: {
+    params: { serverId: string };
+    response: { status: "disconnected" | "connecting" | "connected" | "reconnecting" };
+  };
 };
 
 // === Bun-side messages (fire-and-forget from renderer to main) ===
@@ -221,6 +240,8 @@ type WebViewMessages = {
   autoDeployStatus: AutoDeployEvent;
   javaSetupProgress: { stage: "downloading" | "extracting" | "ready" | "error"; message: string };
   pluginTimingsUpdate: PluginTimingData[];
+  remoteConnectionStatus: { serverId: string; status: "disconnected" | "connecting" | "connected" | "reconnecting" };
+  provisionProgress: { stage: string; message: string };
 };
 
 // === Combined RPC schema for Electrobun ===

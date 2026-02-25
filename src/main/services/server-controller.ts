@@ -6,9 +6,7 @@ import type {
 } from "../../shared/types";
 import type { FrameworkProvider } from "../plugins/plugin-api";
 import type { JavaManager } from "./java-manager";
-
-type StatusCallback = (serverId: string, status: RunningProcess["status"]) => void;
-type ConsoleCallback = (serverId: string, message: ConsoleMessage) => void;
+import type { IServerController, StatusCallback, ConsoleCallback, LineHook } from "./server-controller-interface";
 
 interface ManagedServer {
   instance: ServerInstance;
@@ -18,10 +16,10 @@ interface ManagedServer {
   startedAt: number;
   onConsole: ConsoleCallback;
   onStatus: StatusCallback;
-  onLineHook?: (serverId: string, line: string) => void;
+  onLineHook?: LineHook;
 }
 
-export class ServerController {
+export class ServerController implements IServerController {
   private servers: Map<string, ManagedServer> = new Map();
 
   constructor(private javaManager: JavaManager) {}
@@ -31,7 +29,7 @@ export class ServerController {
     provider: FrameworkProvider,
     onConsole: ConsoleCallback,
     onStatus: StatusCallback,
-    onLineHook?: (serverId: string, line: string) => void,
+    onLineHook?: LineHook,
   ): Promise<void> {
     if (this.servers.has(instance.id)) {
       throw new Error(`Server ${instance.id} is already running.`);
@@ -135,7 +133,7 @@ export class ServerController {
     serverId: string,
     onConsole: ConsoleCallback,
     onStatus: StatusCallback,
-    onLineHook?: (serverId: string, line: string) => void,
+    onLineHook?: LineHook,
   ): Promise<void> {
     const server = this.servers.get(serverId);
     if (!server) {
