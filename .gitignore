@@ -6,6 +6,9 @@ jre/
 *.jar
 .DS_Store
 
+# Agent compiled binary
+agent/blockdev-agent
+
 # Claude agent files (local only)
 CLAUDE.md
 DESIGN.md
