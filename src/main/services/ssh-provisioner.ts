@@ -49,6 +49,18 @@ export class SSHProvisioner {
     return [];
   }
 
+  /** Verify sshpass is installed when password auth is needed. */
+  private async checkSshpass(): Promise<void> {
+    const proc = Bun.spawn(["which", "sshpass"], { stdout: "pipe", stderr: "pipe" });
+    const exitCode = await proc.exited;
+    if (exitCode !== 0) {
+      throw new Error(
+        "sshpass is required for password authentication but was not found. " +
+        "Install it with: sudo apt install sshpass (Debian/Ubuntu), brew install sshpass (macOS), or sudo yum install sshpass (RHEL/CentOS)."
+      );
+    }
+  }
+
   private getSpawnEnv(config: SSHConfig): Record<string, string> | undefined {
     if (config.password) {
       return { ...process.env, SSHPASS: config.password } as Record<string, string>;
@@ -59,6 +71,8 @@ export class SSHProvisioner {
   /** Test SSH connectivity. Returns true if we can connect and run a command. */
   async testConnection(config: SSHConfig): Promise<{ success: boolean; error?: string }> {
     try {
+      if (config.password) await this.checkSshpass();
+
       const proc = Bun.spawn([...this.buildCommandPrefix(config), "ssh", ...this.buildSshArgs(config), "echo blockdev-ok"], {
         stdout: "pipe",
         stderr: "pipe",
@@ -85,6 +99,8 @@ export class SSHProvisioner {
     agentBinaryPath: string,
     onProgress?: ProvisionProgress,
   ): Promise<{ token: string; agentPort: number }> {
+    if (config.password) await this.checkSshpass();
+
     const agentPort = config.agentPort ?? DEFAULT_AGENT_PORT;
     const remoteDir = "~/.blockdev-agent";
     const remoteBinary = `${remoteDir}/blockdev-agent`;

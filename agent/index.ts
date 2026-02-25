@@ -188,6 +188,10 @@ async function handleMessage(ws: import("bun").ServerWebSocket<{ authenticated: 
       ws.send(JSON.stringify({ type: "error", message: "setup-server requires framework, mcVersion, build (strings) and port (number)" }));
       return;
     }
+    if (r.jvmArgs !== undefined && !Array.isArray(r.jvmArgs)) {
+      ws.send(JSON.stringify({ type: "error", message: "setup-server field 'jvmArgs' must be an array if provided" }));
+      return;
+    }
   }
 
   try {

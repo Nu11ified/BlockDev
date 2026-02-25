@@ -134,7 +134,7 @@ export function CreateWorkspace({ onBack, onCreate }: CreateWorkspaceProps) {
 
   const canNext =
     (step === 0 && selectedFramework !== null) ||
-    (step === 1 && (serverLocation === "local" || (serverLocation === "remote" && sshHost.trim() && sshUser.trim() && agentPort > 0 && agentPort <= 65535 && (sshAuthMode === "key" || sshPassword.trim())))) ||
+    (step === 1 && (serverLocation === "local" || (serverLocation === "remote" && sshHost.trim() && sshUser.trim() && agentPort > 0 && agentPort <= 65535 && (sshAuthMode === "key" ? sshKeyPath.trim() : sshPassword.trim())))) ||
     (step === 2 && selectedVersion !== null) ||
     (step === 3 && !creating);
 
