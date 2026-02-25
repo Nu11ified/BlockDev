@@ -1278,6 +1278,11 @@ async function runAutoDeployPipeline(
   const provider = registry.get(framework);
   if (!provider) return;
 
+  // Detect remote servers — if the target is remote, we upload over WebSocket
+  const location = getServerLocation(serverId);
+  const isRemote = location.type === "remote";
+  const remote = isRemote ? getRemoteController(serverId) : undefined;
+
   // Find deployments linked to this server
   const deployments = workspace.deployments.filter((d) => d.server === serverId);
   if (deployments.length === 0) return;
@@ -1310,7 +1315,35 @@ async function runAutoDeployPipeline(
     sendStatus("watching", "File change detected, starting pipeline...");
 
     if (project.type === "script") {
-      // --- KubeJS script project: copy files directly ---
+      // --- KubeJS script project ---
+
+      // Remote server: upload scripts over WebSocket
+      if (isRemote && remote) {
+        sendStatus("deploying", "Uploading scripts to remote server...");
+        try {
+          const scriptsSourceDir = join(projectDir, "server_scripts");
+          // Upload script files to remote
+          const files = await fsp.readdir(scriptsSourceDir).catch(() => [] as string[]);
+          for (const file of files) {
+            if (file.endsWith(".js") || file.endsWith(".ts")) {
+              const content = await fsp.readFile(join(scriptsSourceDir, file));
+              await remote.uploadArtifact(file, Buffer.from(content));
+              await remote.deployArtifact(file, "kubejs/server_scripts");
+            }
+          }
+          // Reload on remote
+          if (remote.isRunning(serverId)) {
+            sendStatus("reloading", "Reloading KubeJS scripts...");
+            await remote.sendCommand(serverId, "/kubejs reload server_scripts");
+          }
+          sendStatus("done", "Scripts deployed to remote server");
+        } catch (err) {
+          sendStatus("error", `Remote deploy failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+        continue;
+      }
+
+      // --- Local: copy files directly ---
       sendStatus("deploying", "Copying scripts to server...");
       try {
         const serverDir = join(workspacePath, "servers", serverId);
@@ -1382,8 +1415,36 @@ async function runAutoDeployPipeline(
         }
 
         // Deploy artifact
-        sendStatus("deploying", "Copying artifact to server...");
         const artifactPath = join(projectDir, project.artifactPath);
+
+        // Remote server: upload artifact over WebSocket
+        if (isRemote && remote) {
+          sendStatus("deploying", "Uploading artifact to remote server...");
+          const content = await fsp.readFile(artifactPath);
+          const name = project.artifactPath.split("/").pop()!;
+          await remote.uploadArtifact(name, Buffer.from(content));
+
+          const deployment = workspace.deployments.find(
+            (d) => d.project === project.id && d.server === serverId,
+          );
+          await remote.deployArtifact(name, deployment?.targetDir ?? "plugins");
+
+          if (remote.isRunning(serverId)) {
+            const reloadCmd = provider.getReloadCommand();
+            if (reloadCmd) {
+              sendStatus("reloading", `Sending reload command: ${reloadCmd}`);
+              await remote.sendCommand(serverId, reloadCmd);
+            } else {
+              sendStatus("reloading", "Restarting remote server...");
+              await remote.restart(serverId, onConsole, onStatus, onLineHook);
+            }
+          }
+          sendStatus("done", "Build & deploy to remote server successful");
+          continue;
+        }
+
+        // Local server: copy artifact directly
+        sendStatus("deploying", "Copying artifact to server...");
         const instance = resolveServer(serverId);
         const buildResult: BuildResult = {
           success: true,
