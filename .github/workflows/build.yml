@@ -97,6 +97,10 @@ jobs:
         if: runner.os == 'Windows'
         run: bun scripts/generate-ico.ts
 
+      - name: Build agent binary (Linux x64)
+        if: runner.os != 'Windows'
+        run: bash scripts/build-agent.sh
+
       - name: Build CSS
         run: bun scripts/build-css.ts
 
