@@ -1160,19 +1160,11 @@ const rpc = BrowserView.defineRPC<BlockDevRPC>({
 
       provisionRemoteAgent: async (params) => {
         try {
-          // Search for the agent binary in all possible locations.
-          // Electrobun copy destinations end up under RESOURCES_FOLDER/app/,
-          // but import.meta.dir varies between dev and production builds.
-          const candidates = [
-            PATHS.RESOURCES_FOLDER ? join(PATHS.RESOURCES_FOLDER, "app", "agent", "blockdev-agent") : "",
-            join(import.meta.dir, "app", "agent", "blockdev-agent"),
-            join(import.meta.dir, "..", "app", "agent", "blockdev-agent"),
-            join(import.meta.dir, "..", "..", "agent", "blockdev-agent"),
-            join(import.meta.dir, "agent", "blockdev-agent"),
-          ].filter(Boolean);
-          const agentBinaryPath = candidates.find((p) => existsSync(p));
-          if (!agentBinaryPath) {
-            throw new Error(`Agent binary not found. Searched:\n${candidates.join("\n")}\n\nRun: bash scripts/build-agent.sh`);
+          // import.meta.dir resolves to Resources/app/bun/ inside the
+          // Electrobun bundle.  Copied files land under Resources/app/.
+          const agentBinaryPath = join(import.meta.dir, "..", "agent", "blockdev-agent");
+          if (!existsSync(agentBinaryPath)) {
+            throw new Error(`Agent binary not found at ${agentBinaryPath}\n\nRun: bash scripts/build-agent.sh`);
           }
           const result = await sshProvisioner.provision(
             {
