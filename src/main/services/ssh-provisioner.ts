@@ -1,8 +1,14 @@
 // src/main/services/ssh-provisioner.ts
 // Handles deploying the blockdev-agent binary to a remote VPS via SSH/SCP.
 
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
+import { homedir } from "node:os";
 import { DEFAULT_AGENT_PORT } from "../../shared/agent-protocol";
+
+// Dedicated known_hosts file so BlockDev doesn't pollute ~/.ssh/known_hosts
+// but still detects changed host keys (MITM protection).
+const BLOCKDEV_KNOWN_HOSTS = join(homedir(), ".blockdev", "known_hosts");
 
 export interface SSHConfig {
   host: string;
@@ -15,13 +21,27 @@ export interface SSHConfig {
 export type ProvisionProgress = (stage: string, message: string) => void;
 
 export class SSHProvisioner {
-  /** Base SSH options: auto-accept host keys, never prompt interactively. */
+  constructor() {
+    // Ensure the directory for our known_hosts file exists
+    mkdirSync(join(homedir(), ".blockdev"), { recursive: true });
+  }
+
+  /**
+   * Base SSH options: accept-new auto-accepts first-time host keys without
+   * prompting, but still rejects changed keys (MITM protection). Uses a
+   * dedicated known_hosts file so we don't pollute ~/.ssh/known_hosts.
+   */
   private buildSshArgs(config: SSHConfig): string[] {
     const args = [
       "-o", "ConnectTimeout=10",
-      "-o", "StrictHostKeyChecking=no",
-      "-o", "UserKnownHostsFile=/dev/null",
+      "-o", "StrictHostKeyChecking=accept-new",
+      "-o", `UserKnownHostsFile=${BLOCKDEV_KNOWN_HOSTS}`,
     ];
+    // BatchMode prevents all interactive prompts (good for key auth) but
+    // must be off for password auth since sshpass needs the password prompt.
+    if (!config.password) {
+      args.push("-o", "BatchMode=yes");
+    }
     if (config.keyPath) {
       args.push("-i", config.keyPath);
     }
@@ -32,9 +52,12 @@ export class SSHProvisioner {
   private buildScpArgs(config: SSHConfig): string[] {
     const args = [
       "-o", "ConnectTimeout=10",
-      "-o", "StrictHostKeyChecking=no",
-      "-o", "UserKnownHostsFile=/dev/null",
+      "-o", "StrictHostKeyChecking=accept-new",
+      "-o", `UserKnownHostsFile=${BLOCKDEV_KNOWN_HOSTS}`,
     ];
+    if (!config.password) {
+      args.push("-o", "BatchMode=yes");
+    }
     if (config.keyPath) {
       args.push("-i", config.keyPath);
     }
