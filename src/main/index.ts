@@ -2,7 +2,7 @@
 // Main process entry point. Creates the window first for immediate feedback,
 // then initializes services and loads plugins in the background.
 
-import { BrowserWindow, BrowserView, Utils, ApplicationMenu } from "electrobun/bun";
+import { BrowserWindow, BrowserView, Utils, ApplicationMenu, PATHS } from "electrobun/bun";
 import { join, resolve } from "node:path";
 import { platform, homedir } from "node:os";
 import { mkdirSync, appendFileSync, promises as fsp } from "node:fs";
@@ -1160,7 +1160,7 @@ const rpc = BrowserView.defineRPC<BlockDevRPC>({
 
       provisionRemoteAgent: async (params) => {
         try {
-          const agentBinaryPath = join(import.meta.dir, "..", "..", "agent", "blockdev-agent");
+          const agentBinaryPath = join(PATHS.RESOURCES_FOLDER, "app", "agent", "blockdev-agent");
           const result = await sshProvisioner.provision(
             {
               host: params.host,
