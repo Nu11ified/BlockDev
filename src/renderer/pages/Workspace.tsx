@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from "react";
-import { LuArrowLeft } from "react-icons/lu";
+import React, { useState, useEffect, useCallback } from "react";
+import { LuArrowLeft, LuCopy, LuCheck } from "react-icons/lu";
 import type { ConsoleMessage, RunningProcess, WorkspaceManifest } from "../../shared/types";
 import { GlassNav, Button } from "../components";
 import { Console } from "../components/Console";
@@ -47,6 +47,7 @@ export function Workspace({ onBack }: WorkspaceProps) {
   const [deleteServerTarget, setDeleteServerTarget] = useState<string | null>(null);
   const [deleteProjectTarget, setDeleteProjectTarget] = useState<string | null>(null);
   const [showDeleteWorkspace, setShowDeleteWorkspace] = useState(false);
+  const [copiedIP, setCopiedIP] = useState(false);
 
   // Fetch the current workspace manifest on mount
   useEffect(() => {
@@ -92,6 +93,27 @@ export function Workspace({ onBack }: WorkspaceProps) {
   const serverDisplayName = currentServer
     ? `${currentServer.framework.charAt(0).toUpperCase() + currentServer.framework.slice(1)} ${currentServer.mcVersion}`
     : manifest?.name || "Workspace";
+
+  const serverAddress = currentServer
+    ? `${currentServer.location?.type === "remote" ? currentServer.location.host : "localhost"}:${currentServer.port}`
+    : null;
+
+  const handleCopyIP = useCallback(() => {
+    if (!serverAddress) return;
+    navigator.clipboard.writeText(serverAddress).catch(() => {
+      // Fallback: use a hidden textarea
+      const el = document.createElement("textarea");
+      el.value = serverAddress;
+      el.style.position = "fixed";
+      el.style.opacity = "0";
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand("copy");
+      document.body.removeChild(el);
+    });
+    setCopiedIP(true);
+    setTimeout(() => setCopiedIP(false), 2000);
+  }, [serverAddress]);
 
   // Subscribe to console output from main process
   useEffect(() => {
@@ -451,6 +473,21 @@ export function Workspace({ onBack }: WorkspaceProps) {
               />
             )}
           </h2>
+          {serverAddress && (
+            <button
+              onClick={handleCopyIP}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs text-text-muted hover:text-text-primary hover:bg-white/5 border border-border-subtle transition-all cursor-pointer"
+              title="Copy server address to clipboard"
+            >
+              {copiedIP ? (
+                <LuCheck className="text-green-400" size={12} />
+              ) : (
+                <LuCopy size={12} />
+              )}
+              <span className="font-mono">{serverAddress}</span>
+              {copiedIP && <span className="text-green-400 text-[10px]">Copied!</span>}
+            </button>
+          )}
           <button
             onClick={() => setShowDeleteWorkspace(true)}
             className="px-2 py-1 rounded-lg text-[10px] text-text-dim hover:text-red-400 hover:bg-red-500/10 transition-all cursor-pointer"
